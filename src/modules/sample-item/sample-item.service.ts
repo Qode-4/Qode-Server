@@ -5,6 +5,7 @@ import type { CreateSampleItemInput, UpdateSampleItemInput } from "./sample-item
 export class SampleItemService {
   constructor(private readonly repository: SampleItemRepository) {}
 
+  // 서비스 계층에서 저장소 호출을 위임하고 도메인 에러를 일관되게 처리합니다.
   list() {
     return this.repository.list();
   }
@@ -36,4 +37,3 @@ export class SampleItemService {
     }
   }
 }
-

@@ -5,6 +5,7 @@ import type {
   UpdateSampleItemInput,
 } from "./sample-item.types.js";
 
+// 서비스/라우트 계층이 저장소 구현에 의존하지 않도록 하는 추상화입니다.
 export interface SampleItemRepository {
   list(): Promise<SampleItem[]>;
   findById(id: string): Promise<SampleItem | null>;
@@ -14,6 +15,7 @@ export interface SampleItemRepository {
 }
 
 export class InMemorySampleItemRepository implements SampleItemRepository {
+  // 로컬/개발 대체 모드에서 사용하는 프로세스 내 메모리 저장소입니다.
   private readonly store = new Map<string, SampleItem>();
 
   async list(): Promise<SampleItem[]> {
@@ -69,6 +71,7 @@ type SampleItemRow = {
   updated_at: Date;
 };
 
+// DB의 snake_case 컬럼을 API의 camelCase 필드로 변환합니다.
 const toSampleItem = (row: SampleItemRow): SampleItem => ({
   id: row.id,
   title: row.title,
@@ -78,6 +81,7 @@ const toSampleItem = (row: SampleItemRow): SampleItem => ({
 });
 
 export const initializeSampleItemTable = async (pool: Pool): Promise<void> => {
+  // 마이그레이션이 없는 환경에서도 동작하도록 최소 스키마를 보장합니다.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sample_items (
       id UUID PRIMARY KEY,
@@ -143,6 +147,7 @@ export class PgSampleItemRepository implements SampleItemRepository {
   }
 
   async update(id: string, input: UpdateSampleItemInput): Promise<SampleItem | null> {
+    // PATCH에서 생략된 필드는 기존 값을 유지합니다.
     const result = await this.pool.query<SampleItemRow>(
       `
       UPDATE sample_items

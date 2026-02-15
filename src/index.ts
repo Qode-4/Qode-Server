@@ -10,6 +10,7 @@ import {
   initializeSampleItemTable,
 } from "./modules/sample-item/sample-item.repository.js";
 
+// 엔트리포인트에서 Fastify 앱을 생성하고 모듈을 연결합니다.
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
 });
@@ -18,9 +19,11 @@ registerErrorHandler(app);
 
 const dbPool = getDbPool();
 if (dbPool) {
+  // Postgres 사용 시 필요한 테이블이 존재하도록 보장합니다.
   await initializeSampleItemTable(dbPool);
 }
 
+// 실행 환경에 따라 저장소 구현체를 전환합니다.
 const sampleItemRepository = dbPool
   ? new PgSampleItemRepository(dbPool)
   : new InMemorySampleItemRepository();
@@ -36,6 +39,7 @@ app.get("/health", async () => {
 
 await registerSampleItemRoutes(app, { repository: sampleItemRepository });
 
+// 정상 종료 시 DB 연결을 정리합니다.
 app.addHook("onClose", async () => {
   await closeDbPool();
 });

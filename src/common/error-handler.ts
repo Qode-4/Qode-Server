@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { HttpError } from "./http-error.js";
 
 export const registerErrorHandler = (app: FastifyInstance) => {
+  // 발생한 모든 에러를 일관된 API 응답 형식으로 정규화합니다.
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
@@ -30,4 +31,3 @@ export const registerErrorHandler = (app: FastifyInstance) => {
     });
   });
 };
-
