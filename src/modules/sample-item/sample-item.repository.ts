@@ -80,19 +80,6 @@ const toSampleItem = (row: SampleItemRow): SampleItem => ({
   updatedAt: row.updated_at.toISOString(),
 });
 
-export const initializeSampleItemTable = async (pool: Pool): Promise<void> => {
-  // 마이그레이션이 없는 환경에서도 동작하도록 최소 스키마를 보장합니다.
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS sample_items (
-      id UUID PRIMARY KEY,
-      title VARCHAR(120) NOT NULL,
-      description TEXT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-};
-
 export class PgSampleItemRepository implements SampleItemRepository {
   constructor(private readonly pool: Pool) {}
 

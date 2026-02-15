@@ -7,6 +7,7 @@ export const registerErrorHandler = (app: FastifyInstance) => {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
+        status: 400,
         ok: false,
         error: "BAD_REQUEST",
         message: "Request validation failed",
@@ -16,6 +17,7 @@ export const registerErrorHandler = (app: FastifyInstance) => {
 
     if (error instanceof HttpError) {
       return reply.status(error.statusCode).send({
+        status: error.statusCode,
         ok: false,
         error: error.name,
         message: error.message,
@@ -25,6 +27,7 @@ export const registerErrorHandler = (app: FastifyInstance) => {
 
     request.log.error(error);
     return reply.status(500).send({
+      status: 500,
       ok: false,
       error: "INTERNAL_SERVER_ERROR",
       message: "Unexpected server error",

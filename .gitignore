@@ -153,3 +153,6 @@ dist
 .svelte-kit
 
 # End of https://www.toptal.com/developers/gitignore/api/node
+
+# Local pnpm store config
+pnpm-workspace.yaml
