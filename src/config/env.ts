@@ -33,6 +33,10 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional()
   ),
+  JWT_SECRET: z.string().min(1),
+  JWT_EXPIRES_IN: z.string().min(1),
+  JWT_REFRESH_SECRET: z.string().min(1),
+  JWT_REFRESH_EXPIRES_IN: z.string().min(1),
 });
 
 export const env = envSchema.parse(process.env);
