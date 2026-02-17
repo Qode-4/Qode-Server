@@ -8,6 +8,10 @@ export interface ProjectRepository {
 
 export class InMemoryProjectRepository implements ProjectRepository {
   private readonly store = new Map<string, Project>();
+  private readonly projectMembers = new Map<
+    string,
+    Array<{ id: string; userId: string; role: "OWNER" | "MEMBER"; joinedAt: string }>
+  >();
 
   async list(): Promise<Project[]> {
     return Array.from(this.store.values()).sort((a, b) =>
@@ -17,9 +21,10 @@ export class InMemoryProjectRepository implements ProjectRepository {
 
   async create(input: CreateProjectInput): Promise<Project> {
     const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
     const inviteCode = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
     const item: Project = {
-      id: crypto.randomUUID(),
+      id: projectId,
       name: input.name,
       description: input.description ?? null,
       gitUrl: input.gitUrl ?? null,
@@ -36,6 +41,14 @@ export class InMemoryProjectRepository implements ProjectRepository {
     };
 
     this.store.set(item.id, item);
+    this.projectMembers.set(projectId, [
+      {
+        id: crypto.randomUUID(),
+        userId: input.createdBy.id,
+        role: "OWNER",
+        joinedAt: now,
+      },
+    ]);
     return item;
   }
 }
@@ -101,54 +114,73 @@ export class PgProjectRepository implements ProjectRepository {
 
   async create(input: CreateProjectInput): Promise<Project> {
     const id = crypto.randomUUID();
+    const projectMemberId = crypto.randomUUID();
     const inviteCode = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
-    const result = await this.pool.query<ProjectRow>(
-      `
-      INSERT INTO projects (
-        id,
-        name,
-        description,
-        git_url,
-        invite_code,
-        last_synced_at,
-        question_count,
-        created_by_id,
-        created_by_name,
-        created_by_avatar_url,
-        role
-      )
-      VALUES ($1, $2, $3, $4, $5, NULL, 0, $6, $7, $8, 'OWNER')
-      RETURNING
-        id,
-        name,
-        description,
-        git_url,
-        invite_code,
-        last_synced_at,
-        question_count,
-        created_at,
-        created_by_id,
-        created_by_name,
-        created_by_avatar_url,
-        role
-      `,
-      [
-        id,
-        input.name,
-        input.description ?? null,
-        input.gitUrl ?? null,
-        inviteCode,
-        input.createdBy.id,
-        input.createdBy.name,
-        input.createdBy.avatarUrl ?? null,
-      ]
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<ProjectRow>(
+        `
+        INSERT INTO projects (
+          id,
+          name,
+          description,
+          git_url,
+          invite_code,
+          last_synced_at,
+          question_count,
+          created_by_id,
+          created_by_name,
+          created_by_avatar_url,
+          role
+        )
+        VALUES ($1, $2, $3, $4, $5, NULL, 0, $6, $7, $8, 'OWNER')
+        RETURNING
+          id,
+          name,
+          description,
+          git_url,
+          invite_code,
+          last_synced_at,
+          question_count,
+          created_at,
+          created_by_id,
+          created_by_name,
+          created_by_avatar_url,
+          role
+        `,
+        [
+          id,
+          input.name,
+          input.description ?? null,
+          input.gitUrl ?? null,
+          inviteCode,
+          input.createdBy.id,
+          input.createdBy.name,
+          input.createdBy.avatarUrl ?? null,
+        ]
+      );
 
-    const row = result.rows[0];
-    if (!row) {
-      throw new Error("Failed to create project");
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error("Failed to create project");
+      }
+
+      await client.query(
+        `
+        INSERT INTO project_members (id, user_id, project_id, role, joined_at)
+        VALUES ($1, $2, $3, 'OWNER', NOW())
+        `,
+        [projectMemberId, input.createdBy.id, id]
+      );
+
+      await client.query("COMMIT");
+      return toProject(row);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
-
-    return toProject(row);
   }
 }
