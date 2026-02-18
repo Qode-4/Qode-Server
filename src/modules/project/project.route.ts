@@ -62,7 +62,7 @@ export const registerProjectRoutes = async (
     const data = await service.listMembersOrThrow(params.id, me.id);
     return reply.send({ ok: true, data });
   });
-
+   
   app.post("/api/projects", async (request, reply) => {
     const body = createProjectBodySchema.parse(request.body);
     const token = getAccessToken(request.headers.authorization);

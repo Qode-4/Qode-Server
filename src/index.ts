@@ -6,6 +6,8 @@ import { env } from "./config/env.js";
 import { closeDbPool, getDbPool } from "./lib/db.js";
 import { registerAuthRoutes } from "./modules/auth/auth.route.js";
 import { InMemoryAuthRepository, PgAuthRepository } from "./modules/auth/auth.repository.js";
+import { createChatRepository } from "./modules/chat/chat.repository.js";
+import { registerChatRoutes } from "./modules/chat/chat.route.js";
 import { initializeCoreSchema } from "./modules/core-schema/core-schema.repository.js";
 import { registerProjectRoutes } from "./modules/project/project.route.js";
 import { InMemoryProjectRepository, PgProjectRepository } from "./modules/project/project.repository.js";
@@ -47,6 +49,19 @@ app.get("/health", async () => {
 await registerSampleItemRoutes(app, { repository: sampleItemRepository });
 await registerProjectRoutes(app, { repository: projectRepository, authRepository });
 await registerAuthRoutes(app, { repository: authRepository });
+if (dbPool) {
+  await registerChatRoutes(app, {
+    repository: createChatRepository(dbPool),
+    // TODO: 실제 LLM 호출로 변경
+    streamAssistant: async function* ({ content }) {
+      const response = `Echo: ${content}`;
+      const tokens = response.split(" ");
+      for (const token of tokens) {
+        yield `${token} `;
+      }
+    }
+  })
+}
 
 // 정상 종료 시 DB 연결을 정리합니다.
 app.addHook("onClose", async () => {
