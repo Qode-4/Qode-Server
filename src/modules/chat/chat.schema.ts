@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const messageStatusSchema = z.enum(["COMPLETE", "PENDING", "FAILED"]);   // 메시지 상태 검증
+export const messageStatusSchema = z.enum(["COMPLETE", "STREAMING", "FAILED"]);   // 메시지 상태 검증
 export const chatTypeSchema = z.enum(["PERSONAL", "TEAM"]); // 채팅 타입 검증
 export const chatMemberRoleSchema = z.enum(["OWNER", "ADMIN", "MEMBER"]);   // 참여자 권한 검증 (default: MEMEBER)
 
@@ -42,9 +42,9 @@ export const updateChatBodySchema = z
 // 메시지 생성 요청 body 검증
 export const createMessageBodySchema = z.object({
   chat_id: z.string().uuid(),
-  user_id: z.string().uuid(),
+  user_id: z.string().uuid().nullable().optional(), // AI인 경우
   content: z.string().trim().min(1).max(4000),
-  message_status: messageStatusSchema.optional().default("PENDING"),
+  status: messageStatusSchema.optional().default("COMPLETE"),
 });
 
 // 메시지 수정 요청 body 검증
@@ -52,9 +52,9 @@ export const createMessageBodySchema = z.object({
 export const updateMessageBodySchema = z
   .object({
     content: z.string().trim().min(1).max(4000).optional(),
-    message_status: messageStatusSchema.optional(),
+    status: messageStatusSchema.optional(),
   })
-  .refine((value) => value.content !== undefined || value.message_status !== undefined, {
+  .refine((value) => value.content !== undefined || value.status !== undefined, {
     message: "At least one field is required",
   });
 

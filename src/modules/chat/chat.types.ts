@@ -1,9 +1,10 @@
 export interface Messages {
   id: string; // PK
   chat_id: string; // FK 
-  user_id: string; // FK 
+  user_id: string | null; // FK (AI일 경우 null)
   content: string; 
-  message_status: 'COMPLETE' | 'PENDING' | 'FAILED';
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM';
+  status: 'COMPLETE' | 'STREAMING' | 'FAILED';
   created_at: string;
 }
 
