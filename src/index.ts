@@ -45,7 +45,7 @@ app.get("/health", async () => {
 });
 
 await registerSampleItemRoutes(app, { repository: sampleItemRepository });
-await registerProjectRoutes(app, { repository: projectRepository });
+await registerProjectRoutes(app, { repository: projectRepository, authRepository });
 await registerAuthRoutes(app, { repository: authRepository });
 
 // 정상 종료 시 DB 연결을 정리합니다.
