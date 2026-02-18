@@ -58,6 +58,41 @@ export const updateMessageBodySchema = z
     message: "At least one field is required",
   });
 
+export const sendUserMessageBodySchema = z.object({
+  user_id: z.string().uuid(),
+  content: z.string().trim().min(1).max(4000),
+});
+
+export const listMessagesQuerySchema = z
+  .object({
+    user_id: z.string().uuid(),
+    before_created_at: z.string().datetime().optional(),
+    before_id: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  })
+  .refine(
+    (value) =>
+      (value.before_created_at === undefined && value.before_id === undefined) ||
+      (value.before_created_at !== undefined && value.before_id !== undefined),
+    {
+      message: "before_created_at and before_id must be provided together",
+      path: ["before_id"],
+    }
+  );
+
+export const listPromptMessagesQuerySchema = z.object({
+  user_id: z.string().uuid(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const finalizeMessageBodySchema = z.object({
+  content: z.string().trim().min(1).max(4000),
+});
+
+export const failMessageBodySchema = z.object({
+  content_partial: z.string().trim().min(1).max(4000).optional(),
+});
+
 // 참여자 추가 요청 body 검증
 // TODO(chat): 참여자 추가 기능 정책 미논의. 팀 논의 후 결정
 export const createChatParticipantBodySchema = z.object({

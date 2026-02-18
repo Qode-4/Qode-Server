@@ -21,7 +21,7 @@ export const registerProjectRoutes = async (
     const data = await service.list();
     return reply.send({ ok: true, data });
   });
-
+   
   app.post("/api/projects", async (request, reply) => {
     const body = createProjectBodySchema.parse(request.body);
     const data = await service.create(body);
