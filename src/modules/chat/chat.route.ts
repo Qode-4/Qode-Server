@@ -44,8 +44,8 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     return reply.status(201).send({ ok: true, data });
   });
 
-  /*
-  app.post("/api/chats/me/:id/messages/stream", async (request, reply) => {
+  // AI streaming message endpoint
+  app.post("/api/chats/me/:id/messages", async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const body = sendUserMessageBodySchema.parse(request.body);
 
@@ -58,7 +58,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
-    let assistantMessage: { id: string } | null = null;
+    let assistantMessageId: string | null = null;
 
     try {
       const userMessage = await service.sendUserMessage({
@@ -67,15 +67,16 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         content: body.content,
       });
 
-      assistantMessage = await service.startAssistantMessage({
+      const assistantMessage = await service.startAssistantMessage({
         chatId: params.id,
         userId: body.user_id,
       });
+      assistantMessageId = assistantMessage.id;
 
       sendEvent("start", {
         chatId: params.id,
         userMessageId: userMessage.id,
-        assistantMessageId: assistantMessage.id,
+        assistantMessageId,
       });
 
       if (!deps.streamAssistant) {
@@ -92,16 +93,20 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         sendEvent("token", { token });
       }
 
+      if (!assistantMessageId) {
+        throw new HttpError(500, "Assistant message id is missing");
+      }
+
       await service.finalizeAssistantMessage({
-        messageId: assistantMessage.id,
+        messageId: assistantMessageId,
         content: fullContent,
       });
-      sendEvent("done", { assistantMessageId: assistantMessage.id });
+      sendEvent("done", { assistantMessageId });
     } catch (error) {
-      if (assistantMessage) {
+      if (assistantMessageId) {
         const partial = error instanceof Error ? error.message : undefined;
         await service.failAssistantMessage({
-          messageId: assistantMessage.id,
+          messageId: assistantMessageId,
           contentPartial: partial,
         });
       }
@@ -117,31 +122,8 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       reply.raw.end();
     }
   });
-  */
 
-  app.post("/api/chats/me/:id/messages", async (request, reply) => {
-    const params = chatIdParamSchema.parse(request.params);
-    const body = sendUserMessageBodySchema.parse(request.body);
-
-    const userMessage = await service.sendUserMessage({
-      chatId: params.id,
-      userId: body.user_id,
-      content: body.content,
-    });
-    const assistantMessage = await service.startAssistantMessage({
-      chatId: params.id,
-      userId: body.user_id,
-    });
-
-    return reply.status(201).send({
-      ok: true,
-      data: {
-        userMessage,
-        assistantMessage,
-      },
-    });
-  });
-
+  // Full message list for UI/debug
   app.get("/api/chats/me/:id/messages", async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const query = listMessagesQuerySchema.parse(request.query);
@@ -155,6 +137,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     return reply.send({ ok: true, data });
   });
 
+  // Prompt messages for LLM input
   app.get("/api/chats/me/:id/prompt-messages", async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const query = listPromptMessagesQuerySchema.parse(request.query);

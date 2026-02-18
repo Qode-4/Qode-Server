@@ -50,7 +50,17 @@ await registerSampleItemRoutes(app, { repository: sampleItemRepository });
 await registerProjectRoutes(app, { repository: projectRepository });
 await registerAuthRoutes(app, { repository: authRepository });
 if (dbPool) {
-  await registerChatRoutes(app, { repository: createChatRepository(dbPool) });
+  await registerChatRoutes(app, {
+    repository: createChatRepository(dbPool),
+    // TODO: 실제 LLM 호출로 변경
+    streamAssistant: async function* ({ content }) {
+      const response = `Echo: ${content}`;
+      const tokens = response.split(" ");
+      for (const token of tokens) {
+        yield `${token} `;
+      }
+    }
+  })
 }
 
 // 정상 종료 시 DB 연결을 정리합니다.
