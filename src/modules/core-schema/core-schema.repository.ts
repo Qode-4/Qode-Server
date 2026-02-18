@@ -44,10 +44,7 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       last_synced_at TIMESTAMPTZ NULL,
       question_count INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      created_by_id UUID NOT NULL,
-      created_by_name VARCHAR(80) NOT NULL,
-      created_by_avatar_url TEXT NULL,
-      role VARCHAR(20) NOT NULL DEFAULT 'OWNER'
+      created_by_id UUID NOT NULL
     )
   `);
 
@@ -57,10 +54,7 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     ADD COLUMN IF NOT EXISTS invite_code VARCHAR(8),
     ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ NULL,
     ADD COLUMN IF NOT EXISTS question_count INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS created_by_id UUID,
-    ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(80),
-    ADD COLUMN IF NOT EXISTS created_by_avatar_url TEXT NULL,
-    ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'OWNER'
+    ADD COLUMN IF NOT EXISTS created_by_id UUID
   `);
 
   await pool.query(`
@@ -68,15 +62,18 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     SET
       invite_code = COALESCE(invite_code, UPPER(SUBSTRING(REPLACE(id::text, '-', '') FROM 1 FOR 8))),
       question_count = COALESCE(question_count, 0),
-      created_by_id = COALESCE(created_by_id, '00000000-0000-0000-0000-000000000000'::uuid),
-      created_by_name = COALESCE(created_by_name, 'Unknown'),
-      role = COALESCE(role, 'OWNER')
+      created_by_id = COALESCE(created_by_id, '00000000-0000-0000-0000-000000000000'::uuid)
     WHERE
       invite_code IS NULL
       OR question_count IS NULL
       OR created_by_id IS NULL
-      OR created_by_name IS NULL
-      OR role IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE projects
+    DROP COLUMN IF EXISTS created_by_name,
+    DROP COLUMN IF EXISTS created_by_avatar_url,
+    DROP COLUMN IF EXISTS role
   `);
 
   await pool.query(`
