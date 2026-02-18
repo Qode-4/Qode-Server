@@ -38,6 +38,12 @@ type ListPromptMessagesInput = {
   limit?: number;
 };
 
+type ListMyChatsInput = {
+  projectId: string;
+  userId: string;
+  limit?: number;
+};
+
 export class ChatService {
   constructor(private readonly repository: ChatRepository) {}
 
@@ -74,6 +80,14 @@ export class ChatService {
       name: input.name,
       chatType: "PERSONAL",
     });
+  }
+
+  async listMyChats(input: ListMyChatsInput) {
+    const chats = await this.repository.listChatsByProject({
+      projectId: input.projectId,
+      limit: input.limit,
+    });
+    return chats.filter((chat) => chat.created_by === input.userId && chat.chat_type === "PERSONAL");
   }
 
   async sendUserMessage(input: SendUserMessageInput) {

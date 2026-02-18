@@ -63,6 +63,12 @@ export const sendUserMessageBodySchema = z.object({
   content: z.string().trim().min(1).max(4000),
 });
 
+export const listMyChatsQuerySchema = z.object({
+  project_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 export const listMessagesQuerySchema = z
   .object({
     user_id: z.string().uuid(),

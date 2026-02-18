@@ -4,6 +4,7 @@ import { createChatRepository } from "./chat.repository.js";
 import {
   chatIdParamSchema,
   createChatBodySchema,
+  listMyChatsQuerySchema,
   listMessagesQuerySchema,
   listPromptMessagesQuerySchema,
   sendUserMessageBodySchema,
@@ -29,6 +30,16 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
   }
 
   const service = new ChatService(deps.repository);
+
+  app.get("/api/chats/me", async (request, reply) => {
+    const query = listMyChatsQuerySchema.parse(request.query);
+    const data = await service.listMyChats({
+      projectId: query.project_id,
+      userId: query.user_id,
+      limit: query.limit,
+    });
+    return reply.send({ ok: true, data });
+  });
 
   app.post("/api/chats/me", async (request, reply) => {
     const body = createChatBodySchema.parse(request.body);
