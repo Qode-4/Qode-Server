@@ -88,34 +88,96 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       joined_at TIMESTAMPTZ NULL
     )
   `);
-
+  
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE chat_type AS ENUM ('PERSONAL', 'TEAM');
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+  
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chats (
       id UUID PRIMARY KEY,
-      project_id UUID NOT NULL,
-      created_by UUID NOT NULL,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      created_by UUID NOT NULL REFERENCES users(id),
       name VARCHAR(100) NOT NULL,
-      type TEXT NOT NULL DEFAULT 'PERSONAL' CHECK (type IN ('PERSONAL', 'TEAM')),
-      created_at TIMESTAMPTZ NULL
+      chat_type chat_type NOT NULL DEFAULT 'PERSONAL',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_chats_project_id ON chats(project_id);
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE message_status AS ENUM ('COMPLETE', 'STREAMING', 'FAILED');
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE message_role AS ENUM ('USER', 'ASSISTANT', 'SYSTEM');
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id UUID PRIMARY KEY,
-      chat_id UUID NOT NULL,
-      user_id UUID NULL,
-      role TEXT NOT NULL CHECK (role IN ('USER', 'ASSISTANT')),
-      content TEXT NOT NULL,
-      status TEXT NULL DEFAULT 'COMPLETE' CHECK (status IN ('COMPLETE', 'FAILED')),
-      created_at TIMESTAMPTZ NULL
+      chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      user_id UUID NULL REFERENCES users(id) ON DELETE CASCADE,
+      role message_role NOT NULL DEFAULT 'USER',
+      content TEXT NOT NULL DEFAULT '',
+      status message_status NOT NULL DEFAULT 'COMPLETE',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_time
+    ON messages (chat_id, created_at)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_user_id
+    ON messages (user_id)
+  `);
+
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE member_role AS ENUM ('OWNER', 'ADMIN', 'MEMBER');
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_participants (
+      chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      member_role member_role NOT NULL DEFAULT 'MEMBER',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      left_at TIMESTAMPTZ NULL,
+      PRIMARY KEY (chat_id, user_id)
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sources (
       id BIGSERIAL PRIMARY KEY,
-      message_id UUID NOT NULL,
+      message_id UUID NOT NULL REFERENCES messages(id),
       file_path TEXT NOT NULL,
       start_line INT NULL,
       end_line INT NULL,
