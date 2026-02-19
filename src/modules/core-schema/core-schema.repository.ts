@@ -92,6 +92,61 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     )
   `);
 
+  // Legacy 데이터 중 부모가 없는 멤버 레코드를 정리한 뒤 FK를 추가합니다.
+  await pool.query(`
+    DELETE FROM project_members pm
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM projects p
+      WHERE p.id = pm.project_id
+    )
+  `);
+
+  await pool.query(`
+    DELETE FROM project_members pm
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM users u
+      WHERE u.id = pm.user_id
+    )
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'project_members_project_id_fkey'
+      ) THEN
+        ALTER TABLE project_members DROP CONSTRAINT project_members_project_id_fkey;
+      END IF;
+      ALTER TABLE project_members
+      ADD CONSTRAINT project_members_project_id_fkey
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'project_members_user_id_fkey'
+      ) THEN
+        ALTER TABLE project_members DROP CONSTRAINT project_members_user_id_fkey;
+      END IF;
+      ALTER TABLE project_members
+      ADD CONSTRAINT project_members_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS project_sync_jobs (
       id UUID PRIMARY KEY,
@@ -338,6 +393,34 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       end_line INT NULL,
       snippet TEXT NOT NULL
     )
+  `);
+
+  // Legacy 데이터 중 부모 메시지가 없는 소스 레코드를 정리합니다.
+  await pool.query(`
+    DELETE FROM sources s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM messages m
+      WHERE m.id = s.message_id
+    )
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'sources_message_id_fkey'
+      ) THEN
+        ALTER TABLE sources DROP CONSTRAINT sources_message_id_fkey;
+      END IF;
+      ALTER TABLE sources
+      ADD CONSTRAINT sources_message_id_fkey
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE;
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
   `);
 
   await pool.query(`
