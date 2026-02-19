@@ -37,6 +37,13 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),
   JWT_REFRESH_EXPIRES_IN: z.string().min(1),
+  GITHUB_OAUTH_CLIENT_ID: z.string().min(1),
+  GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1),
+  GITHUB_OAUTH_SCOPES: z.string().min(1).default("repo read:user"),
+  TOKEN_ENCRYPTION_KEY: z.string().min(1),
+  SYNC_REPO_BASE_DIR: z.string().min(1).default("./.data/repos"),
+  SYNC_WORKER_ENABLED: booleanFromEnv.default(true),
+  SYNC_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
 });
 
 export const env = envSchema.parse(process.env);

@@ -5,17 +5,22 @@ import { AuthService } from "../auth/auth.service.js";
 import {
   createProjectBodySchema,
   projectIdParamSchema,
-  updateProjectGitUrlBodySchema,
+  projectSyncJobParamSchema,
+  projectSyncStatusParamSchema,
 } from "./project.schema.js";
 import {
   InMemoryProjectRepository,
   type ProjectRepository,
 } from "./project.repository.js";
+import type { GithubOauthService } from "../github-oauth/github-oauth.service.js";
+import { ProjectSyncCoordinator, ProjectSyncService } from "./project-sync.service.js";
 import { ProjectService } from "./project.service.js";
 
 type RouteDeps = {
   repository?: ProjectRepository;
   authRepository?: AuthRepository;
+  syncCoordinator?: ProjectSyncCoordinator;
+  githubOauthService?: GithubOauthService;
 };
 
 export const registerProjectRoutes = async (
@@ -26,6 +31,8 @@ export const registerProjectRoutes = async (
   const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
   const authService = new AuthService(authRepository);
   const service = new ProjectService(repository);
+  const syncCoordinator = deps.syncCoordinator ?? new ProjectSyncCoordinator(repository);
+  const syncService = new ProjectSyncService(repository, syncCoordinator);
 
   const getAccessToken = (authorization?: string): string => {
     if (!authorization || !authorization.startsWith("Bearer ")) {
@@ -67,20 +74,79 @@ export const registerProjectRoutes = async (
     const body = createProjectBodySchema.parse(request.body);
     const token = getAccessToken(request.headers.authorization);
     const me = await authService.getMe(token);
-    const data = await service.create(body, {
-      id: me.id,
-      name: me.name,
-      avatarUrl: me.avatarUrl,
-    });
+    const project = await service.create(
+      { name: body.name, description: body.description ?? null, gitUrl: null },
+      {
+        id: me.id,
+        name: me.name,
+        avatarUrl: me.avatarUrl,
+      }
+    );
+
+    let syncJob = null;
+    if (body.git) {
+      const githubOauthService = deps.githubOauthService;
+      if (!githubOauthService) {
+        throw new HttpError(503, "GitHub OAuth 기능을 사용할 수 없습니다.");
+      }
+
+      const tokenRefId = await githubOauthService.getAuthorizedTokenRefIdOrThrow(
+        body.git.flowId,
+        me.id
+      );
+      const repoMeta = await githubOauthService.verifyRepoAccess({
+        tokenRefId,
+        owner: body.git.owner,
+        repo: body.git.repo,
+      });
+
+      // TODO(정책보류): 프로젝트 OWNER 변경/탈퇴 시 token_ref_id 승계/재매핑 정책 미정.
+      await repository.createGitConnection({
+        projectId: project.id,
+        provider: "github_oauth",
+        owner: body.git.owner,
+        repo: body.git.repo,
+        defaultBranch: body.git.defaultBranch || repoMeta.defaultBranch,
+        gitUrl: repoMeta.gitUrl,
+        tokenRefId,
+        connectedBy: me.id,
+      });
+
+      syncJob = await repository.createSyncJob({
+        projectId: project.id,
+        requestedBy: me.id,
+      });
+      syncCoordinator.enqueue(syncJob);
+    }
+
+    const data = {
+      ...project,
+      syncJob,
+    };
     return reply.status(201).send({ ok: true, data });
   });
 
-  app.patch("/api/projects/:id/git-url", async (request, reply) => {
+  app.post("/api/projects/:id/sync", async (request, reply) => {
     const params = projectIdParamSchema.parse(request.params);
-    const body = updateProjectGitUrlBodySchema.parse(request.body);
     const token = getAccessToken(request.headers.authorization);
     const me = await authService.getMe(token);
-    const data = await service.updateGitUrl(params.id, me.id, body.gitUrl);
+    const data = await syncService.requestSync(params.id, me.id);
+    return reply.status(202).send({ ok: true, data });
+  });
+
+  app.get("/api/projects/:projectId/sync/status", async (request, reply) => {
+    const params = projectSyncStatusParamSchema.parse(request.params);
+    const token = getAccessToken(request.headers.authorization);
+    const me = await authService.getMe(token);
+    const data = await syncService.getLatestSyncStatusOrThrow(params.projectId, me.id);
+    return reply.send({ ok: true, data });
+  });
+
+  app.get("/api/projects/:id/sync-jobs/:jobId", async (request, reply) => {
+    const params = projectSyncJobParamSchema.parse(request.params);
+    const token = getAccessToken(request.headers.authorization);
+    const me = await authService.getMe(token);
+    const data = await syncService.getSyncJobOrThrow(params.id, params.jobId, me.id);
     return reply.send({ ok: true, data });
   });
 };
