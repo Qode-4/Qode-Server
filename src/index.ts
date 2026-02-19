@@ -91,14 +91,35 @@ const projectRepository = dbPool
 const authRepository = dbPool ? new PgAuthRepository(dbPool) : new InMemoryAuthRepository();
 const syncCoordinator = new ProjectSyncCoordinator(projectRepository as ProjectRepository);
 
-app.get("/health", async () => {
-  return {
-    ok: true,
-    service: "qode-server",
-    storage: dbPool ? "postgres" : "memory",
-    now: new Date().toISOString(),
-  };
-});
+app.get(
+  "/health",
+  {
+    schema: {
+      tags: ["system"],
+      summary: "Health check",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            service: { type: "string" },
+            storage: { type: "string", enum: ["postgres", "memory"] },
+            now: { type: "string", format: "date-time" },
+          },
+          required: ["ok", "service", "storage", "now"],
+        },
+      },
+    },
+  },
+  async () => {
+    return {
+      ok: true,
+      service: "qode-server",
+      storage: dbPool ? "postgres" : "memory",
+      now: new Date().toISOString(),
+    };
+  }
+);
 
 await registerSampleItemRoutes(app, { repository: sampleItemRepository });
 await registerAuthRoutes(app, { repository: authRepository });
