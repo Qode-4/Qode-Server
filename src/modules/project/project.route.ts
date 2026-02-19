@@ -4,6 +4,7 @@ import { InMemoryAuthRepository, type AuthRepository } from "../auth/auth.reposi
 import { AuthService } from "../auth/auth.service.js";
 import {
   createProjectBodySchema,
+  inviteProjectMembersBodySchema,
   projectIdParamSchema,
   projectSyncJobParamSchema,
   projectSyncStatusParamSchema,
@@ -30,7 +31,7 @@ export const registerProjectRoutes = async (
   const repository = deps.repository ?? new InMemoryProjectRepository();
   const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
   const authService = new AuthService(authRepository);
-  const service = new ProjectService(repository);
+  const service = new ProjectService(repository, authRepository);
   const syncCoordinator = deps.syncCoordinator ?? new ProjectSyncCoordinator(repository);
   const syncService = new ProjectSyncService(repository, syncCoordinator);
   const authHeaderSchema = {
@@ -248,6 +249,54 @@ export const registerProjectRoutes = async (
       const me = await authService.getMe(token);
       const data = await service.listMembersOrThrow(params.id, me.id);
       return reply.send({ ok: true, data });
+    }
+  );
+
+  app.post(
+    "/api/projects/:id/members/invite",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Invite project members by emails",
+        headers: authHeaderSchema,
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            emails: {
+              type: "array",
+              minItems: 1,
+              maxItems: 50,
+              items: { type: "string", format: "email", maxLength: 100 },
+            },
+          },
+          required: ["emails"],
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "array", items: projectMemberSchema },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = projectIdParamSchema.parse(request.params);
+      const body = inviteProjectMembersBodySchema.parse(request.body);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+      const data = await service.inviteMembersByEmails(params.id, me.id, body.emails);
+      return reply.status(201).send({ ok: true, data });
     }
   );
    

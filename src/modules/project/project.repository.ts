@@ -20,6 +20,11 @@ export interface ProjectRepository {
   list(currentUserId: string): Promise<Project[]>;
   findByIdForUser(projectId: string, currentUserId: string): Promise<Project | null>;
   listMembers(projectId: string): Promise<ProjectMember[]>;
+  addMember(input: {
+    projectId: string;
+    user: { id: string; name: string; avatarUrl: string | null };
+    role: ProjectRole;
+  }): Promise<ProjectMember>;
   create(input: CreateProjectInput, creator: ProjectCreator): Promise<Project>;
   existsById(projectId: string): Promise<boolean>;
   findMemberRole(projectId: string, userId: string): Promise<ProjectRole | null>;
@@ -162,6 +167,35 @@ export class InMemoryProjectRepository implements ProjectRepository {
         }
         return a.joinedAt < b.joinedAt ? -1 : 1;
       });
+  }
+
+  async addMember(input: {
+    projectId: string;
+    user: { id: string; name: string; avatarUrl: string | null };
+    role: ProjectRole;
+  }): Promise<ProjectMember> {
+    const members = this.projectMembers.get(input.projectId);
+    if (!members) {
+      throw new Error("Project not found");
+    }
+
+    const joinedAt = new Date().toISOString();
+    members.push({
+      id: crypto.randomUUID(),
+      userId: input.user.id,
+      role: input.role,
+      joinedAt,
+      name: input.user.name,
+      avatarUrl: input.user.avatarUrl,
+    });
+
+    return {
+      id: input.user.id,
+      name: input.user.name,
+      avatarUrl: input.user.avatarUrl,
+      role: input.role,
+      joinedAt,
+    };
   }
 
   async findMemberRole(projectId: string, userId: string): Promise<ProjectRole | null> {
@@ -497,6 +531,34 @@ export class PgProjectRepository implements ProjectRepository {
       role: row.role,
       joinedAt: row.joined_at ? row.joined_at.toISOString() : null,
     }));
+  }
+
+  async addMember(input: {
+    projectId: string;
+    user: { id: string; name: string; avatarUrl: string | null };
+    role: ProjectRole;
+  }): Promise<ProjectMember> {
+    const result = await this.pool.query<ProjectMemberRow>(
+      `
+      INSERT INTO project_members (id, user_id, project_id, role, joined_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING user_id, role, joined_at
+      `,
+      [crypto.randomUUID(), input.user.id, input.projectId, input.role]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error("Failed to add project member");
+    }
+
+    return {
+      id: row.user_id,
+      name: input.user.name,
+      avatarUrl: input.user.avatarUrl,
+      role: row.role,
+      joinedAt: row.joined_at ? row.joined_at.toISOString() : null,
+    };
   }
 
   async create(input: CreateProjectInput, creator: ProjectCreator): Promise<Project> {
