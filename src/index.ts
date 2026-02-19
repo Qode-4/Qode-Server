@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { registerErrorHandler } from "./common/error-handler.js";
@@ -25,7 +25,7 @@ import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 
-// 엔트리포인트에서 Fastify 앱을 생성하고 모듈을 연결합니다.
+// ?뷀듃由ы룷?명듃?먯꽌 Fastify ?깆쓣 ?앹꽦?섍퀬 紐⑤뱢???곌껐?⑸땲??
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
 });
@@ -81,11 +81,11 @@ await app.register(swaggerUi, {
 
 const dbPool = getDbPool();
 if (dbPool) {
-  // Postgres 사용 시 필요한 테이블이 존재하도록 보장합니다.
+  // Postgres ?ъ슜 ???꾩슂???뚯씠釉붿씠 議댁옱?섎룄濡?蹂댁옣?⑸땲??
   await initializeCoreSchema(dbPool);
 }
 
-// 실행 환경에 따라 저장소 구현체를 전환합니다.
+// ?ㅽ뻾 ?섍꼍???곕씪 ??μ냼 援ы쁽泥대? ?꾪솚?⑸땲??
 const sampleItemRepository = dbPool
   ? new PgSampleItemRepository(dbPool)
   : new InMemorySampleItemRepository();
@@ -170,11 +170,13 @@ if (dbPool) {
   const chatRepository = createChatRepository(dbPool);
   await registerChatRoutes(app, {
     repository: chatRepository,
+    authRepository,
     streamAssistant: async function* ({ chatId, content }) {
       if (!openAiClient) {
         yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
         return;
       }
+
       const chat = await chatRepository.getChatById(chatId);
       if (!chat) {
         yield "채팅방을 찾을 수 없습니다.";
@@ -241,3 +243,4 @@ const start = async () => {
 };
 
 void start();
+
