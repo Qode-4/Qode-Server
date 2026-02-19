@@ -26,3 +26,21 @@ export const projectSyncJobParamSchema = z.object({
 export const projectSyncStatusParamSchema = z.object({
   projectId: z.string().uuid(),
 });
+
+export const inviteProjectMembersBodySchema = z.object({
+  emails: z.array(z.string().trim().email().max(100)).min(1).max(50),
+}).superRefine((value, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, rawEmail] of value.emails.entries()) {
+    const normalized = rawEmail.trim().toLowerCase();
+    if (seen.has(normalized)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "중복된 이메일은 허용되지 않습니다.",
+        path: ["emails", index],
+      });
+      continue;
+    }
+    seen.add(normalized);
+  }
+});
