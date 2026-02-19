@@ -140,7 +140,11 @@ export class ProjectSyncCoordinator {
 
   constructor(
     private readonly repository: ProjectRepository,
-    private readonly options: { reposRoot?: string; maxConcurrency?: number } = {}
+    private readonly options: {
+      reposRoot?: string;
+      maxConcurrency?: number;
+      onJobCompleted?: (input: { projectId: string; syncedCommit: string }) => Promise<void> | void;
+    } = {}
   ) {}
 
   enqueue(job: ProjectSyncJob): void {
@@ -180,6 +184,11 @@ export class ProjectSyncCoordinator {
       try {
         const syncedCommit = await this.syncProjectRepository(job.projectId, job.id);
         await this.repository.completeSyncJob(job.id, syncedCommit);
+        try {
+          await this.options.onJobCompleted?.({ projectId: job.projectId, syncedCommit });
+        } catch {
+          // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
+        }
         return;
       } catch (error) {
         const mapped = toSyncJobError(error);

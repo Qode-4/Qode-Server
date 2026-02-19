@@ -290,6 +290,20 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_analysis (
+      id UUID PRIMARY KEY,
+      project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL CHECK (status IN ('building', 'ready', 'failed')),
+      summary JSONB NULL,
+      source_commit TEXT NULL,
+      error_message TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sample_items (
       id UUID PRIMARY KEY,
       title VARCHAR(120) NOT NULL,
