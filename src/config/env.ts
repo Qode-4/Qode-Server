@@ -63,6 +63,11 @@ const envSchema = z.object({
   SYNC_REPO_BASE_DIR: z.string().min(1).default("./.data/repos"),
   SYNC_WORKER_ENABLED: booleanFromEnv.default(true),
   SYNC_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
+  OPENAI_API_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(1).optional()
+  ),
+  OPENAI_MODEL: z.string().min(1).default("gpt-4.1-mini"),
 });
 
 export const env = envSchema.parse(process.env);
