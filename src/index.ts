@@ -175,7 +175,6 @@ if (dbPool) {
         yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
         return;
       }
-
       const chat = await chatRepository.getChatById(chatId);
       if (!chat) {
         yield "채팅방을 찾을 수 없습니다.";

@@ -1,5 +1,7 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { HttpError } from "../../common/http-error.js";
+import { AuthService } from "../auth/auth.service.js";
+import type { AuthRepository } from "../auth/auth.repository.js";
 import { createChatRepository } from "./chat.repository.js";
 import {
   chatIdParamSchema,
@@ -21,7 +23,27 @@ type StreamAssistantInput = {
 
 type RouteDeps = {
   repository: ChatRepository;
+  authRepository: AuthRepository;
   streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<string>;
+};
+
+type ChatRow = {
+  id: string;
+  project_id: string;
+  created_by: string;
+  name: string;
+  chat_type: "PERSONAL" | "TEAM";
+  created_at: string;
+};
+
+type MessageRow = {
+  id: string;
+  chat_id: string;
+  user_id: string | null;
+  role: "USER" | "ASSISTANT" | "SYSTEM";
+  content: string;
+  status: "COMPLETE" | "STREAMING" | "FAILED";
+  created_at: string;
 };
 
 export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) => {
@@ -30,6 +52,22 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
   }
 
   const service = new ChatService(deps.repository);
+  const authService = new AuthService(deps.authRepository);
+
+  const getRequestUserId = async (request: FastifyRequest) => {
+    const authorization = request.headers.authorization;
+    if (!authorization || !authorization.startsWith("Bearer ")) {
+      throw new HttpError(401, "Unauthorized");
+    }
+
+    const token = authorization.slice("Bearer ".length).trim();
+    if (!token) {
+      throw new HttpError(401, "Unauthorized");
+    }
+
+    const me = await authService.getMe(token);
+    return me.id;
+  };
   const chatItemSchema = {
     type: "object",
     properties: {
@@ -66,6 +104,25 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     required: ["role", "content"],
   } as const;
 
+  const mapChat = (row: ChatRow) => ({
+    id: row.id,
+    project_id: row.project_id,
+    created_by: row.created_by,
+    name: row.name,
+    chat_type: row.chat_type,
+    created_at: row.created_at,
+  });
+
+  const mapMessage = (row: MessageRow) => ({
+    id: row.id,
+    chat_id: row.chat_id,
+    user_id: row.user_id,
+    role: row.role,
+    content: row.content,
+    status: row.status,
+    created_at: row.created_at,
+  });
+
   app.get(
     "/api/chats/me",
     {
@@ -76,10 +133,9 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           type: "object",
           properties: {
             project_id: { type: "string", format: "uuid" },
-            user_id: { type: "string", format: "uuid" },
             limit: { type: "integer", minimum: 1, maximum: 100 },
           },
-          required: ["project_id", "user_id"],
+          required: ["project_id"],
         },
         response: {
           200: {
@@ -95,12 +151,13 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     },
     async (request, reply) => {
       const query = listMyChatsQuerySchema.parse(request.query);
+      const userId = await getRequestUserId(request);
       const data = await service.listMyChats({
         projectId: query.project_id,
-        userId: query.user_id,
+        userId,
         limit: query.limit,
       });
-      return reply.send({ ok: true, data });
+      return reply.send({ ok: true, data: data.map(mapChat) });
     }
   );
 
@@ -114,11 +171,10 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           type: "object",
           properties: {
             project_id: { type: "string", format: "uuid" },
-            created_by: { type: "string", format: "uuid" },
             chat_type: { type: "string", enum: ["PERSONAL"] },
             name: { type: "string", minLength: 1, maxLength: 100 },
           },
-          required: ["project_id", "created_by", "chat_type", "name"],
+          required: ["project_id", "chat_type", "name"],
         },
         response: {
           201: {
@@ -134,16 +190,17 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     },
     async (request, reply) => {
       const body = createChatBodySchema.parse(request.body);
+      const userId = await getRequestUserId(request);
       if (body.chat_type !== "PERSONAL") {
         throw new HttpError(400, "Only PERSONAL chat is supported now");
       }
 
       const data = await service.createPersonalChat({
         projectId: body.project_id,
-        userId: body.created_by,
+        userId,
         name: body.name,
       });
-      return reply.status(201).send({ ok: true, data });
+      return reply.status(201).send({ ok: true, data: mapChat(data as ChatRow) });
     }
   );
 
@@ -163,10 +220,9 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         body: {
           type: "object",
           properties: {
-            user_id: { type: "string", format: "uuid" },
             content: { type: "string", minLength: 1, maxLength: 4000 },
           },
-          required: ["user_id", "content"],
+          required: ["content"],
         },
         produces: ["text/event-stream"],
         response: {
@@ -180,6 +236,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     async (request, reply) => {
       const params = chatIdParamSchema.parse(request.params);
       const body = sendUserMessageBodySchema.parse(request.body);
+      const userId = await getRequestUserId(request);
 
       reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
       reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
@@ -195,13 +252,13 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       try {
         const userMessage = await service.sendUserMessage({
           chatId: params.id,
-          userId: body.user_id,
+          userId,
           content: body.content,
         });
 
         const assistantMessage = await service.startAssistantMessage({
           chatId: params.id,
-          userId: body.user_id,
+          userId,
         });
         assistantMessageId = assistantMessage.id;
 
@@ -218,7 +275,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         let fullContent = "";
         for await (const token of deps.streamAssistant({
           chatId: params.id,
-          userId: body.user_id,
+          userId,
           content: body.content,
         })) {
           fullContent += token;
@@ -272,7 +329,6 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         querystring: {
           type: "object",
           properties: {
-            user_id: { type: "string", format: "uuid" },
             before_created_at: { type: "string", format: "date-time" },
             before_id: { type: "string", format: "uuid" },
             limit: { type: "integer", minimum: 1, maximum: 100 },
@@ -287,7 +343,6 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
               then: { required: ["before_created_at"] },
             },
           ],
-          required: ["user_id"],
         },
         response: {
           200: {
@@ -304,14 +359,15 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     async (request, reply) => {
       const params = chatIdParamSchema.parse(request.params);
       const query = listMessagesQuerySchema.parse(request.query);
+      const userId = await getRequestUserId(request);
       const data = await service.listMessages({
         chatId: params.id,
-        userId: query.user_id,
+        userId,
         beforeCreatedAt: query.before_created_at,
         beforeId: query.before_id,
         limit: query.limit,
       });
-      return reply.send({ ok: true, data });
+      return reply.send({ ok: true, data: data.map(mapMessage) });
     }
   );
 
@@ -331,10 +387,8 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         querystring: {
           type: "object",
           properties: {
-            user_id: { type: "string", format: "uuid" },
             limit: { type: "integer", minimum: 1, maximum: 100 },
           },
-          required: ["user_id"],
         },
         response: {
           200: {
@@ -351,9 +405,10 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     async (request, reply) => {
       const params = chatIdParamSchema.parse(request.params);
       const query = listPromptMessagesQuerySchema.parse(request.query);
+      const userId = await getRequestUserId(request);
       const data = await service.listPromptMessages({
         chatId: params.id,
-        userId: query.user_id,
+        userId,
         limit: query.limit,
       });
       return reply.send({ ok: true, data });
