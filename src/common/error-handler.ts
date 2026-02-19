@@ -16,10 +16,18 @@ export const registerErrorHandler = (app: FastifyInstance) => {
     }
 
     if (error instanceof HttpError) {
+      const codedDetails =
+        error.details &&
+        typeof error.details === "object" &&
+        "code" in error.details &&
+        typeof (error.details as { code?: unknown }).code === "string"
+          ? (error.details as { code: string }).code
+          : null;
+
       return reply.status(error.statusCode).send({
         status: error.statusCode,
         ok: false,
-        error: error.name,
+        error: codedDetails ?? error.name,
         message: error.message,
         details: error.details,
       });

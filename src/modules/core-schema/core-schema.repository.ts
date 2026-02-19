@@ -40,43 +40,46 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       name VARCHAR(120) NOT NULL,
       description TEXT NULL,
       git_url TEXT NULL,
+      git_auth_type TEXT NOT NULL DEFAULT 'NONE',
+      git_access_token_encrypted TEXT NULL,
       invite_code VARCHAR(8) NOT NULL,
       last_synced_at TIMESTAMPTZ NULL,
       question_count INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      created_by_id UUID NOT NULL,
-      created_by_name VARCHAR(80) NOT NULL,
-      created_by_avatar_url TEXT NULL,
-      role VARCHAR(20) NOT NULL DEFAULT 'OWNER'
+      created_by_id UUID NOT NULL
     )
   `);
 
   await pool.query(`
     ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS git_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS git_auth_type TEXT NOT NULL DEFAULT 'NONE',
+    ADD COLUMN IF NOT EXISTS git_access_token_encrypted TEXT NULL,
     ADD COLUMN IF NOT EXISTS invite_code VARCHAR(8),
     ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ NULL,
     ADD COLUMN IF NOT EXISTS question_count INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS created_by_id UUID,
-    ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(80),
-    ADD COLUMN IF NOT EXISTS created_by_avatar_url TEXT NULL,
-    ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'OWNER'
+    ADD COLUMN IF NOT EXISTS created_by_id UUID
   `);
 
   await pool.query(`
     UPDATE projects
     SET
       invite_code = COALESCE(invite_code, UPPER(SUBSTRING(REPLACE(id::text, '-', '') FROM 1 FOR 8))),
+      git_auth_type = COALESCE(git_auth_type, 'NONE'),
       question_count = COALESCE(question_count, 0),
-      created_by_id = COALESCE(created_by_id, '00000000-0000-0000-0000-000000000000'::uuid),
-      created_by_name = COALESCE(created_by_name, 'Unknown'),
-      role = COALESCE(role, 'OWNER')
+      created_by_id = COALESCE(created_by_id, '00000000-0000-0000-0000-000000000000'::uuid)
     WHERE
       invite_code IS NULL
+      OR git_auth_type IS NULL
       OR question_count IS NULL
       OR created_by_id IS NULL
-      OR created_by_name IS NULL
-      OR role IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE projects
+    DROP COLUMN IF EXISTS created_by_name,
+    DROP COLUMN IF EXISTS created_by_avatar_url,
+    DROP COLUMN IF EXISTS role
   `);
 
   await pool.query(`
@@ -86,6 +89,107 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       project_id UUID NOT NULL,
       role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('OWNER', 'MEMBER')),
       joined_at TIMESTAMPTZ NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_sync_jobs (
+      id UUID PRIMARY KEY,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      requested_by UUID NOT NULL REFERENCES users(id),
+      status TEXT NOT NULL CHECK (status IN ('queued', 'syncing', 'done', 'failed')),
+      progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+      error_code TEXT NULL,
+      error_message TEXT NULL,
+      synced_commit TEXT NULL,
+      error TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMPTZ NULL,
+      finished_at TIMESTAMPTZ NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_project_sync_jobs_project_created_at
+    ON project_sync_jobs (project_id, created_at DESC)
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'project_sync_jobs_status_check'
+      ) THEN
+        ALTER TABLE project_sync_jobs DROP CONSTRAINT project_sync_jobs_status_check;
+      END IF;
+      ALTER TABLE project_sync_jobs
+      ADD CONSTRAINT project_sync_jobs_status_check
+      CHECK (status IN ('queued', 'syncing', 'done', 'failed'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS github_oauth_tokens (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      github_user_id BIGINT NOT NULL,
+      github_login TEXT NOT NULL,
+      access_token_encrypted TEXT NOT NULL,
+      refresh_token_encrypted TEXT NULL,
+      scope TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, github_user_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS github_oauth_device_flows (
+      flow_id UUID PRIMARY KEY,
+      requested_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_code TEXT NOT NULL,
+      user_code TEXT NOT NULL,
+      verification_uri TEXT NOT NULL,
+      verification_uri_complete TEXT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      interval_sec INT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('auth_pending', 'authorized', 'auth_failed', 'expired')),
+      token_ref_id UUID NULL REFERENCES github_oauth_tokens(id) ON DELETE SET NULL,
+      error TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_github_oauth_device_flows_requested_by
+    ON github_oauth_device_flows (requested_by)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_github_oauth_device_flows_status
+    ON github_oauth_device_flows (status)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_git_connections (
+      id UUID PRIMARY KEY,
+      project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL CHECK (provider = 'github_oauth'),
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      default_branch TEXT NOT NULL,
+      git_url TEXT NOT NULL,
+      token_ref_id UUID NOT NULL REFERENCES github_oauth_tokens(id),
+      connected_by UUID NOT NULL REFERENCES users(id),
+      connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
   
@@ -233,6 +337,20 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       start_line INT NULL,
       end_line INT NULL,
       snippet TEXT NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_analysis (
+      id UUID PRIMARY KEY,
+      project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL CHECK (status IN ('building', 'ready', 'failed')),
+      summary JSONB NULL,
+      source_commit TEXT NULL,
+      error_message TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
