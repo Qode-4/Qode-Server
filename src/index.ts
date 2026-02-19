@@ -14,6 +14,9 @@ import { InMemoryProjectRepository, PgProjectRepository } from "./modules/projec
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
 
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+
 // 엔트리포인트에서 Fastify 앱을 생성하고 모듈을 연결합니다.
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
@@ -21,6 +24,22 @@ const app = Fastify({
 
 registerErrorHandler(app);
 await app.register(cookie);
+
+
+// swagger-ui 
+await app.register(swagger, {
+  openapi: {
+    info: {
+      title: "Qode Server API",
+      version: "0.1.0",
+    },
+    servers: [{ url: "http://localhost:3000" }],
+  },
+});
+
+await app.register(swaggerUi, {
+  routePrefix: "/docs",
+});
 
 const dbPool = getDbPool();
 if (dbPool) {

@@ -31,7 +31,34 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
 
   const service = new ChatService(deps.repository);
 
-  app.get("/api/chats/me", async (request, reply) => {
+  app.get(
+    "/api/chats/me",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "List my chats",
+        querystring: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", format: "uuid" },
+            user_id: { type: "string", format: "uuid" },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+          },
+          required: ["project_id", "user_id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "array", items: { type: "object" } },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const query = listMyChatsQuerySchema.parse(request.query);
     const data = await service.listMyChats({
       projectId: query.project_id,
@@ -39,9 +66,38 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       limit: query.limit,
     });
     return reply.send({ ok: true, data });
-  });
+    }
+  );
 
-  app.post("/api/chats/me", async (request, reply) => {
+  app.post(
+    "/api/chats/me",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "Create personal chat",
+        body: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", format: "uuid" },
+            created_by: { type: "string", format: "uuid" },
+            chat_type: { type: "string", enum: ["PERSONAL", "GROUP"] },
+            name: { type: "string", minLength: 1, maxLength: 120 },
+          },
+          required: ["project_id", "created_by", "chat_type", "name"],
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "object" },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const body = createChatBodySchema.parse(request.body);
     if (body.chat_type !== "PERSONAL") {
       throw new HttpError(400, "Only PERSONAL chat is supported now");
@@ -53,10 +109,41 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       name: body.name,
     });
     return reply.status(201).send({ ok: true, data });
-  });
+    }
+  );
 
   // AI streaming message endpoint
-  app.post("/api/chats/me/:id/messages", async (request, reply) => {
+  app.post(
+    "/api/chats/me/:id/messages",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "Send user message and stream assistant response",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            user_id: { type: "string", format: "uuid" },
+            content: { type: "string", minLength: 1 },
+          },
+          required: ["user_id", "content"],
+        },
+        produces: ["text/event-stream"],
+        response: {
+          200: {
+            description: "Server-sent events stream",
+            type: "string",
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const body = sendUserMessageBodySchema.parse(request.body);
 
@@ -132,10 +219,46 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     } finally {
       reply.raw.end();
     }
-  });
+    }
+  );
 
   // Full message list for UI/debug
-  app.get("/api/chats/me/:id/messages", async (request, reply) => {
+  app.get(
+    "/api/chats/me/:id/messages",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "List chat messages",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            user_id: { type: "string", format: "uuid" },
+            before_created_at: { type: "string", format: "date-time" },
+            before_id: { type: "string", format: "uuid" },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+          },
+          required: ["user_id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "array", items: { type: "object" } },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const query = listMessagesQuerySchema.parse(request.query);
     const data = await service.listMessages({
@@ -146,10 +269,44 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       limit: query.limit,
     });
     return reply.send({ ok: true, data });
-  });
+    }
+  );
 
   // Prompt messages for LLM input
-  app.get("/api/chats/me/:id/prompt-messages", async (request, reply) => {
+  app.get(
+    "/api/chats/me/:id/prompt-messages",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "List prompt messages for LLM",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            user_id: { type: "string", format: "uuid" },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+          },
+          required: ["user_id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "array", items: { type: "object" } },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const params = chatIdParamSchema.parse(request.params);
     const query = listPromptMessagesQuerySchema.parse(request.query);
     const data = await service.listPromptMessages({
@@ -158,5 +315,6 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       limit: query.limit,
     });
     return reply.send({ ok: true, data });
-  });
+    }
+  );
 };
