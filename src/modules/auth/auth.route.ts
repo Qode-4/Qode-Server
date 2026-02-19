@@ -26,6 +26,26 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
   const repository = deps.repository ?? new InMemoryAuthRepository();
   const service = new AuthService(repository);
 
+  const authUserSchema = {
+    type: "object",
+    properties: {
+      id: { type: "string", format: "uuid" },
+      email: { type: "string", format: "email" },
+      name: { type: "string" },
+      avatarUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
+    },
+    required: ["id", "email", "name", "avatarUrl"],
+  } as const;
+
+  const authTokenUserResponseSchema = {
+    type: "object",
+    properties: {
+      token: { type: "string" },
+      user: authUserSchema,
+    },
+    required: ["token", "user"],
+  } as const;
+
   app.post(
     "/auth/signup",
     {
@@ -42,14 +62,7 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
           required: ["email", "password", "name"],
         },
         response: {
-          201: {
-            type: "object",
-            properties: {
-              token: { type: "string" },
-              user: { type: "object" },
-            },
-            required: ["token", "user"],
-          },
+          201: authTokenUserResponseSchema,
         },
       },
     },
@@ -76,14 +89,7 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
           required: ["email", "password"],
         },
         response: {
-          200: {
-            type: "object",
-            properties: {
-              token: { type: "string" },
-              user: { type: "object" },
-            },
-            required: ["token", "user"],
-          },
+          200: authTokenUserResponseSchema,
         },
       },
     },
@@ -102,21 +108,14 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
         tags: ["auth"],
         summary: "Refresh access token",
         response: {
-          200: {
-            type: "object",
-            properties: {
-              token: { type: "string" },
-              user: { type: "object" },
-            },
-            required: ["token", "user"],
-          },
+          200: authTokenUserResponseSchema,
         },
       },
     },
     async (request, reply) => {
       const refreshToken = request.cookies[REFRESH_COOKIE_NAME];
       if (!refreshToken) {
-        throw new HttpError(401, "?몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐 二쇱꽭??");
+        throw new HttpError(401, "인증이 만료되었습니다. 다시 로그인해주세요.");
       }
 
       const data = await service.refresh(refreshToken);
@@ -141,6 +140,14 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
         response: {
           200: {
             type: "object",
+            properties: {
+              id: { type: "string", format: "uuid" },
+              token: { type: "string" },
+              email: { type: "string", format: "email" },
+              name: { type: "string" },
+              avatarUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
+            },
+            required: ["id", "token", "email", "name", "avatarUrl"],
           },
         },
       },
@@ -148,12 +155,12 @@ export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps =
     async (request, reply) => {
       const authorization = request.headers.authorization;
       if (!authorization || !authorization.startsWith("Bearer ")) {
-        throw new HttpError(401, "?몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐 二쇱꽭??");
+        throw new HttpError(401, "인증이 만료되었습니다. 다시 로그인해주세요.");
       }
 
       const token = authorization.slice("Bearer ".length).trim();
       if (!token) {
-        throw new HttpError(401, "?몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐 二쇱꽭??");
+        throw new HttpError(401, "인증이 만료되었습니다. 다시 로그인해주세요.");
       }
 
       const data = await service.getMe(token);
