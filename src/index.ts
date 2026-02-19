@@ -9,8 +9,12 @@ import { InMemoryAuthRepository, PgAuthRepository } from "./modules/auth/auth.re
 import { createChatRepository } from "./modules/chat/chat.repository.js";
 import { registerChatRoutes } from "./modules/chat/chat.route.js";
 import { initializeCoreSchema } from "./modules/core-schema/core-schema.repository.js";
+import { registerGithubOauthRoutes } from "./modules/github-oauth/github-oauth.route.js";
+import { PgGithubOauthRepository } from "./modules/github-oauth/github-oauth.repository.js";
+import { GithubOauthService } from "./modules/github-oauth/github-oauth.service.js";
 import { registerProjectRoutes } from "./modules/project/project.route.js";
-import { InMemoryProjectRepository, PgProjectRepository } from "./modules/project/project.repository.js";
+import { InMemoryProjectRepository, PgProjectRepository, type ProjectRepository } from "./modules/project/project.repository.js";
+import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
 
@@ -55,6 +59,7 @@ const projectRepository = dbPool
   ? new PgProjectRepository(dbPool)
   : new InMemoryProjectRepository();
 const authRepository = dbPool ? new PgAuthRepository(dbPool) : new InMemoryAuthRepository();
+const syncCoordinator = new ProjectSyncCoordinator(projectRepository as ProjectRepository);
 
 app.get("/health", async () => {
   return {
@@ -66,8 +71,23 @@ app.get("/health", async () => {
 });
 
 await registerSampleItemRoutes(app, { repository: sampleItemRepository });
-await registerProjectRoutes(app, { repository: projectRepository, authRepository });
 await registerAuthRoutes(app, { repository: authRepository });
+if (dbPool) {
+  const githubOauthRepository = new PgGithubOauthRepository(dbPool);
+  const githubOauthService = new GithubOauthService(githubOauthRepository);
+  await registerGithubOauthRoutes(app, {
+    repository: githubOauthRepository,
+    authRepository,
+  });
+  await registerProjectRoutes(app, {
+    repository: projectRepository,
+    authRepository,
+    githubOauthService,
+    syncCoordinator,
+  });
+} else {
+  await registerProjectRoutes(app, { repository: projectRepository, authRepository, syncCoordinator });
+}
 if (dbPool) {
   await registerChatRoutes(app, {
     repository: createChatRepository(dbPool),
