@@ -204,6 +204,38 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     }
   );
 
+  app.delete(
+    "/api/chats/me/:id",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "Delete personal chat",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        response: {
+          204: {
+            description: "No content",
+            type: "null",
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = chatIdParamSchema.parse(request.params);
+      const userId = await getRequestUserId(request);
+      await service.deleteMyChat({
+        chatId: params.id,
+        userId,
+      });
+      return reply.status(204).send();
+    }
+  );
+
   app.post(
     "/api/chats/me/:id/messages",
     {

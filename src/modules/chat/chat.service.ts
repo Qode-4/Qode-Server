@@ -44,6 +44,11 @@ type ListMyChatsInput = {
   limit?: number;
 };
 
+type DeleteMyChatInput = {
+  chatId: string;
+  userId: string;
+};
+
 export class ChatService {
   constructor(private readonly repository: ChatRepository) {}
 
@@ -88,6 +93,21 @@ export class ChatService {
       limit: input.limit,
     });
     return chats.filter((chat) => chat.created_by === input.userId && chat.chat_type === "PERSONAL");
+  }
+
+  async deleteMyChat(input: DeleteMyChatInput) {
+    const chat = await this.getChatOrThrow(input.chatId);
+    if (chat.chat_type !== "PERSONAL") {
+      throw new HttpError(400, "Only PERSONAL chat can be deleted now");
+    }
+    if (chat.created_by !== input.userId) {
+      throw new HttpError(403, "Forbidden");
+    }
+
+    const deleted = await this.repository.deleteChatById(input.chatId);
+    if (!deleted) {
+      throw new HttpError(404, "Chat not found");
+    }
   }
 
   async sendUserMessage(input: SendUserMessageInput) {

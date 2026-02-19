@@ -60,6 +60,15 @@ export function createChatRepository(pool: Pool) {
     return r.rows;
   }
 
+  async function deleteChatById(chatId: string) {
+    const q = `
+      DELETE FROM chats
+      WHERE id = $1
+    `;
+    const r = await pool.query(q, [chatId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
   // =========================
   // Participants (TEAM 권한 체크용)
   // =========================
@@ -211,6 +220,7 @@ export function createChatRepository(pool: Pool) {
     getChatById,
     createChat,
     listChatsByProject,
+    deleteChatById,
 
     // Participants
     isActiveMember,
