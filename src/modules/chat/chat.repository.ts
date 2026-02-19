@@ -202,7 +202,8 @@ export function createChatRepository(pool: Pool) {
       ? [params.chatId, params.beforeCreatedAt, params.beforeId, limit]
       : [params.chatId, limit];
     const r = await pool.query(q, args);
-    return r.rows;
+    // Keep DESC query for stable cursor pagination, but return ASC for UI rendering order.
+    return r.rows.reverse();
   }
 
   return {

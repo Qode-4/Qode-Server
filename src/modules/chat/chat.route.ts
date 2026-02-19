@@ -24,6 +24,25 @@ type RouteDeps = {
   streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<string>;
 };
 
+type ChatRow = {
+  id: string;
+  project_id: string;
+  created_by: string;
+  name: string;
+  chat_type: "PERSONAL" | "TEAM";
+  created_at: string;
+};
+
+type MessageRow = {
+  id: string;
+  chat_id: string;
+  user_id: string | null;
+  role: "USER" | "ASSISTANT" | "SYSTEM";
+  content: string;
+  status: "COMPLETE" | "STREAMING" | "FAILED";
+  created_at: string;
+};
+
 export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) => {
   if (!deps.repository) {
     throw new HttpError(503, "Chat repository is unavailable");
@@ -66,6 +85,25 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     required: ["role", "content"],
   } as const;
 
+  const mapChat = (row: ChatRow) => ({
+    id: row.id,
+    project_id: row.project_id,
+    created_by: row.created_by,
+    name: row.name,
+    chat_type: row.chat_type,
+    created_at: row.created_at,
+  });
+
+  const mapMessage = (row: MessageRow) => ({
+    id: row.id,
+    chat_id: row.chat_id,
+    user_id: row.user_id,
+    role: row.role,
+    content: row.content,
+    status: row.status,
+    created_at: row.created_at,
+  });
+
   app.get(
     "/api/chats/me",
     {
@@ -100,7 +138,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         userId: query.user_id,
         limit: query.limit,
       });
-      return reply.send({ ok: true, data });
+      return reply.send({ ok: true, data: data.map(mapChat) });
     }
   );
 
@@ -143,7 +181,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         userId: body.created_by,
         name: body.name,
       });
-      return reply.status(201).send({ ok: true, data });
+      return reply.status(201).send({ ok: true, data: mapChat(data as ChatRow) });
     }
   );
 
@@ -311,7 +349,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         beforeId: query.before_id,
         limit: query.limit,
       });
-      return reply.send({ ok: true, data });
+      return reply.send({ ok: true, data: data.map(mapMessage) });
     }
   );
 

@@ -110,6 +110,23 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE chats
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
+  `);
+
+  await pool.query(`
+    UPDATE chats
+    SET created_at = NOW()
+    WHERE created_at IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE chats
+    ALTER COLUMN created_at SET DEFAULT NOW(),
+    ALTER COLUMN created_at SET NOT NULL
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_chats_project_id ON chats(project_id);
   `);
 
@@ -144,6 +161,23 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
+  `);
+
+  await pool.query(`
+    UPDATE messages
+    SET created_at = NOW()
+    WHERE created_at IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE messages
+    ALTER COLUMN created_at SET DEFAULT NOW(),
+    ALTER COLUMN created_at SET NOT NULL
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_chat_time
     ON messages (chat_id, created_at)
   `);
@@ -172,6 +206,23 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       left_at TIMESTAMPTZ NULL,
       PRIMARY KEY (chat_id, user_id)
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE chat_participants
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
+  `);
+
+  await pool.query(`
+    UPDATE chat_participants
+    SET created_at = NOW()
+    WHERE created_at IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE chat_participants
+    ALTER COLUMN created_at SET DEFAULT NOW(),
+    ALTER COLUMN created_at SET NOT NULL
   `);
 
   await pool.query(`
