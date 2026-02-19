@@ -24,7 +24,6 @@ export const chatParticipantParamSchema = z.object({
 // TODO: 채팅 이름 최대 길이 논의
 export const createChatBodySchema = z.object({
   project_id: z.string().uuid(),
-  created_by: z.string().uuid(),
   name: z.string().trim().min(1).max(100),
   chat_type: chatTypeSchema,
 });
@@ -59,19 +58,16 @@ export const updateMessageBodySchema = z
   });
 
 export const sendUserMessageBodySchema = z.object({
-  user_id: z.string().uuid(),
   content: z.string().trim().min(1).max(4000),
 });
 
 export const listMyChatsQuerySchema = z.object({
   project_id: z.string().uuid(),
-  user_id: z.string().uuid(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export const listMessagesQuerySchema = z
   .object({
-    user_id: z.string().uuid(),
     before_created_at: z.string().datetime().optional(),
     before_id: z.string().uuid().optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -87,7 +83,6 @@ export const listMessagesQuerySchema = z
   );
 
 export const listPromptMessagesQuerySchema = z.object({
-  user_id: z.string().uuid(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 

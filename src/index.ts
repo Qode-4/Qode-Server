@@ -71,6 +71,7 @@ await registerAuthRoutes(app, { repository: authRepository });
 if (dbPool) {
   await registerChatRoutes(app, {
     repository: createChatRepository(dbPool),
+    authRepository,
     // TODO: 실제 LLM 호출로 변경
     streamAssistant: async function* ({ content }) {
       const response = `Echo: ${content}`;
