@@ -29,6 +29,36 @@ const app = Fastify({
 registerErrorHandler(app);
 await app.register(cookie);
 
+const CORS_ALLOWED_METHODS = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
+const CORS_DEFAULT_ALLOWED_HEADERS = "Content-Type, Authorization";
+
+app.addHook("onRequest", async (request, reply) => {
+  const origin = request.headers.origin;
+  if (!origin) {
+    return;
+  }
+  if (!env.CORS_ALLOWED_ORIGINS.includes(origin)) {
+    return;
+  }
+
+  reply.header("Vary", "Origin");
+  reply.header("Access-Control-Allow-Origin", origin);
+  reply.header("Access-Control-Allow-Credentials", "true");
+
+  if (request.method !== "OPTIONS") {
+    return;
+  }
+
+  const requestedHeaders = request.headers["access-control-request-headers"];
+  const allowedHeaders = Array.isArray(requestedHeaders)
+    ? requestedHeaders.join(", ")
+    : requestedHeaders ?? CORS_DEFAULT_ALLOWED_HEADERS;
+  reply.header("Access-Control-Allow-Methods", CORS_ALLOWED_METHODS);
+  reply.header("Access-Control-Allow-Headers", allowedHeaders);
+  reply.header("Access-Control-Max-Age", "86400");
+  reply.code(204).send();
+});
+
 
 // swagger-ui 
 await app.register(swagger, {

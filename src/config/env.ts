@@ -19,10 +19,29 @@ const booleanFromEnv = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const corsOriginsFromEnv = z.preprocess((value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  return value;
+}, z.array(z.string().url()).min(1));
+
 // 애플리케이션 시작 시 엄격히 검증하기 위한 환경변수 스키마입니다.
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
+  CORS_ALLOWED_ORIGINS: corsOriginsFromEnv.default([
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ]),
   DATABASE_URL: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().url().optional()
