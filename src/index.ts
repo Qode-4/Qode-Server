@@ -33,7 +33,7 @@ await app.register(swagger, {
       title: "Qode Server API",
       version: "0.1.0",
     },
-    servers: [{ url: "http://localhost:3000" }],
+    servers: [{ url: "/" }],
   },
 });
 
