@@ -48,6 +48,7 @@ export interface ProjectRepository {
   updateSyncJobProgress(jobId: string, progress: number): Promise<void>;
   completeSyncJob(jobId: string, syncedCommit: string): Promise<void>;
   failSyncJob(jobId: string, errorCode: ProjectSyncErrorCode, errorMessage: string): Promise<void>;
+  deleteById(projectId: string): Promise<void>;
 }
 
 type StoredProject = Omit<Project, "role">;
@@ -354,6 +355,17 @@ export class InMemoryProjectRepository implements ProjectRepository {
       finishedAt: now,
       updatedAt: now,
     });
+  }
+
+  async deleteById(projectId: string): Promise<void> {
+    this.store.delete(projectId);
+    this.gitConnections.delete(projectId);
+    this.projectMembers.delete(projectId);
+    for (const [jobId, job] of this.syncJobs.entries()) {
+      if (job.projectId === projectId) {
+        this.syncJobs.delete(jobId);
+      }
+    }
   }
 }
 
@@ -948,6 +960,16 @@ export class PgProjectRepository implements ProjectRepository {
       WHERE id = $1
       `,
       [jobId, errorCode, errorMessage]
+    );
+  }
+
+  async deleteById(projectId: string): Promise<void> {
+    await this.pool.query(
+      `
+      DELETE FROM projects
+      WHERE id = $1
+      `,
+      [projectId]
     );
   }
 }

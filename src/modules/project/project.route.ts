@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import { HttpError } from "../../common/http-error.js";
+import { env } from "../../config/env.js";
 import { InMemoryAuthRepository, type AuthRepository } from "../auth/auth.repository.js";
 import { AuthService } from "../auth/auth.service.js";
+import type { ProjectAnalysisService } from "../project-analysis/project-analysis.service.js";
 import {
   createProjectBodySchema,
   inviteProjectMembersBodySchema,
@@ -22,6 +26,7 @@ type RouteDeps = {
   authRepository?: AuthRepository;
   syncCoordinator?: ProjectSyncCoordinator;
   githubOauthService?: GithubOauthService;
+  projectAnalysisService?: ProjectAnalysisService;
 };
 
 export const registerProjectRoutes = async (
@@ -34,6 +39,7 @@ export const registerProjectRoutes = async (
   const service = new ProjectService(repository, authRepository);
   const syncCoordinator = deps.syncCoordinator ?? new ProjectSyncCoordinator(repository);
   const syncService = new ProjectSyncService(repository, syncCoordinator);
+  const reposRoot = resolve(process.cwd(), env.SYNC_REPO_BASE_DIR);
   const authHeaderSchema = {
     type: "object",
     properties: {
@@ -179,6 +185,41 @@ export const registerProjectRoutes = async (
       const me = await authService.getMe(token);
       const data = await service.list(me.id);
       return reply.send({ ok: true, data });
+    }
+  );
+
+  app.delete(
+    "/api/projects/:id",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Delete project",
+        headers: authHeaderSchema,
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        response: {
+          204: {
+            type: "null",
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = projectIdParamSchema.parse(request.params);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+
+      await service.deleteOrThrow(params.id, me.id);
+      syncCoordinator.removeProject(params.id);
+      deps.projectAnalysisService?.markProjectDeleted(params.id);
+      await rm(resolve(reposRoot, params.id), { recursive: true, force: true });
+
+      return reply.status(204).send();
     }
   );
 

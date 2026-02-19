@@ -106,4 +106,18 @@ export class ProjectService {
 
     return invitedMembers;
   }
+
+  async deleteOrThrow(projectId: string, currentUserId: string): Promise<void> {
+    const exists = await this.repository.existsById(projectId);
+    if (!exists) {
+      throw new HttpError(404, "프로젝트를 찾을 수 없습니다.");
+    }
+
+    const myRole = await this.repository.findMemberRole(projectId, currentUserId);
+    if (myRole !== "OWNER") {
+      throw new HttpError(403, "프로젝트 삭제 권한이 없습니다.");
+    }
+
+    await this.repository.deleteById(projectId);
+  }
 }

@@ -97,14 +97,53 @@ export class ProjectAnalysisService {
     await this.scheduleRebuild(projectId, sourceCommit);
   }
 
+  markProjectDeleted(projectId: string): void {
+    this.runningProjects.delete(projectId);
+  }
+
+  private isProjectReferenceError(error: unknown): boolean {
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+
+    const pgError = error as { code?: string };
+    return pgError.code === "23503";
+  }
+
+  private async upsertIfProjectExists(input: {
+    projectId: string;
+    status: "building" | "ready" | "failed";
+    summary: ProjectAnalysis["summary"];
+    sourceCommit: string | null;
+    errorMessage: string | null;
+  }): Promise<boolean> {
+    const exists = await this.projectRepository.existsById(input.projectId);
+    if (!exists) {
+      return false;
+    }
+
+    try {
+      await this.repository.upsertAnalysis(input);
+      return true;
+    } catch (error) {
+      if (this.isProjectReferenceError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async scheduleRebuild(projectId: string, sourceCommit: string | null): Promise<void> {
-    await this.repository.upsertAnalysis({
+    const queued = await this.upsertIfProjectExists({
       projectId,
       status: "building",
       summary: null,
       sourceCommit,
       errorMessage: null,
     });
+    if (!queued) {
+      return;
+    }
 
     if (this.runningProjects.has(projectId)) {
       return;
@@ -125,7 +164,7 @@ export class ProjectAnalysisService {
         repositorySnapshot,
       });
 
-      await this.repository.upsertAnalysis({
+      await this.upsertIfProjectExists({
         projectId,
         status: "ready",
         summary,
@@ -134,13 +173,17 @@ export class ProjectAnalysisService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
-      await this.repository.upsertAnalysis({
-        projectId,
-        status: "failed",
-        summary: null,
-        sourceCommit,
-        errorMessage: message,
-      });
+      try {
+        await this.upsertIfProjectExists({
+          projectId,
+          status: "failed",
+          summary: null,
+          sourceCommit,
+          errorMessage: message,
+        });
+      } catch {
+        // 프로젝트 삭제/경합 중 분석 실패 기록 저장이 실패해도 워커를 중단시키지 않습니다.
+      }
     }
   }
 

@@ -156,6 +156,7 @@ if (dbPool) {
     authRepository,
     githubOauthService,
     syncCoordinator,
+    projectAnalysisService: projectAnalysisService ?? undefined,
   });
   if (projectAnalysisService) {
     await registerProjectAnalysisRoutes(app, {
@@ -164,7 +165,12 @@ if (dbPool) {
     });
   }
 } else {
-  await registerProjectRoutes(app, { repository: projectRepository, authRepository, syncCoordinator });
+  await registerProjectRoutes(app, {
+    repository: projectRepository,
+    authRepository,
+    syncCoordinator,
+    projectAnalysisService: projectAnalysisService ?? undefined,
+  });
 }
 if (dbPool) {
   const chatRepository = createChatRepository(dbPool);
@@ -243,4 +249,3 @@ const start = async () => {
 };
 
 void start();
-

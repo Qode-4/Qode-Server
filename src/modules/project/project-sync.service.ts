@@ -136,6 +136,7 @@ const formatErrorMessage = (error: unknown): string => {
 export class ProjectSyncCoordinator {
   private readonly queue: ProjectSyncJob[] = [];
   private readonly runningProjectIds = new Set<string>();
+  private readonly removedProjectIds = new Set<string>();
   private runningCount = 0;
 
   constructor(
@@ -153,6 +154,15 @@ export class ProjectSyncCoordinator {
       return;
     }
     this.drain();
+  }
+
+  removeProject(projectId: string): void {
+    this.removedProjectIds.add(projectId);
+    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+      if (this.queue[index]?.projectId === projectId) {
+        this.queue.splice(index, 1);
+      }
+    }
   }
 
   private drain(): void {
@@ -177,14 +187,24 @@ export class ProjectSyncCoordinator {
   }
 
   private async run(job: ProjectSyncJob): Promise<void> {
+    if (this.removedProjectIds.has(job.projectId)) {
+      return;
+    }
+
     await this.repository.markSyncJobRunning(job.id);
     let lastError: SyncJobError | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
       try {
         const syncedCommit = await this.syncProjectRepository(job.projectId, job.id);
+        if (this.removedProjectIds.has(job.projectId)) {
+          return;
+        }
         await this.repository.completeSyncJob(job.id, syncedCommit);
         try {
+          if (this.removedProjectIds.has(job.projectId)) {
+            return;
+          }
           await this.options.onJobCompleted?.({ projectId: job.projectId, syncedCommit });
         } catch {
           // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
@@ -193,12 +213,18 @@ export class ProjectSyncCoordinator {
       } catch (error) {
         const mapped = toSyncJobError(error);
         lastError = mapped;
+        if (this.removedProjectIds.has(job.projectId)) {
+          return;
+        }
         if (!mapped.retriable || attempt === MAX_RETRIES) {
           break;
         }
       }
     }
 
+    if (this.removedProjectIds.has(job.projectId)) {
+      return;
+    }
     await this.repository.failSyncJob(
       job.id,
       lastError?.code ?? "PROJECT_SYNC_UNKNOWN_ERROR",
@@ -207,6 +233,10 @@ export class ProjectSyncCoordinator {
   }
 
   private async syncProjectRepository(projectId: string, jobId: string): Promise<string> {
+    if (this.removedProjectIds.has(projectId)) {
+      throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
+    }
+
     const target = await this.repository.getSyncTarget(projectId);
     if (!target) {
       throw new SyncJobError("PROJECT_SYNC_REPO_NOT_CONFIGURED", "Project repository is not connected");
@@ -257,16 +287,25 @@ esac
     };
 
     try {
+      if (this.removedProjectIds.has(projectId)) {
+        throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
+      }
       await this.repository.updateSyncJobProgress(jobId, 45);
       await runGitCommand(["clone", "--depth", "1", target.gitUrl, stagingPath], SYNC_TIMEOUT_MS, {
         env: gitEnv,
       });
 
+      if (this.removedProjectIds.has(projectId)) {
+        throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
+      }
       await this.repository.updateSyncJobProgress(jobId, 65);
       await runGitCommand(["-C", stagingPath, "checkout", "--force", "HEAD"], SYNC_TIMEOUT_MS, {
         env: gitEnv,
       });
 
+      if (this.removedProjectIds.has(projectId)) {
+        throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
+      }
       await this.repository.updateSyncJobProgress(jobId, 80);
       const commitResult = await runGitCommand(["-C", stagingPath, "rev-parse", "HEAD"], SYNC_TIMEOUT_MS, {
         env: gitEnv,
@@ -277,6 +316,9 @@ esac
       }
       await stat(resolve(stagingPath, ".git"));
 
+      if (this.removedProjectIds.has(projectId)) {
+        throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
+      }
       await this.repository.updateSyncJobProgress(jobId, 95);
       await rename(stagingPath, releasePath);
       await rm(nextCurrentPath, { recursive: true, force: true });
