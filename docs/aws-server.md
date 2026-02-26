@@ -1,23 +1,9 @@
-# 1. 현재 PM2 프로세스 확인
-pm2 list
-
-# 2. 기존 앱 중지/삭제 (앱 이름이 qode-server가 아닐 수 있으니 list 보고 이름 맞춰서)
-pm2 stop qode-server
-pm2 delete qode-server
-
-# 전체 다 지우려면 (주의)
-pm2 delete all
-
-# 3. 프로젝트에서 재빌드
-cd /path/to/Qode-Server
-pnpm install
-pnpm build
-
-# 4. 다시 실행
-pm2 start dist/index.js --name qode-server
-
-# 5. 부팅시 자동시작 저장
-pm2 save
-
-# 6. 로그 확인
-pm2 logs qode-server
+| 구분 | 기술 | 역할 | 비교 |
+| --- | --- | --- | --- |
+| CI | GitHub Actions | 테스트/빌드/배포 트리거 | `main` merge 시 |
+| CD 대상 | AWS EC2 | 앱 실행 서버 | AWS Linux |
+| 프로세스 매니저 | PM2 | 무중단 재시작 및 로그 관리 |  |
+| 런타임 | Node.js 22.22.0 | 서버 실행 |  |
+| 패키지 매니저 | pnpm 10.x | 의존성 설치 및 빌드 | `corepack` 사용 |
+| 배포 방식 | SSH pull deploy | 서버에서 `git pull` 후 재시작 |  |
+| 암호 | Github Secrets | SSH 키, 호스트, 환경 변수 |  |
