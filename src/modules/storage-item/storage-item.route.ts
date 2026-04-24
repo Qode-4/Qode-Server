@@ -33,7 +33,7 @@ export const registerStorageItemRoutes = async (
   const projectRepository = deps.projectRepository ?? new InMemoryProjectRepository();
   const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
   const authService = new AuthService(authRepository);
-  const service = new StorageItemService(repository, projectRepository, authRepository);
+  const service = new StorageItemService(repository, projectRepository);
 
   const authHeaderSchema = {
     type: "object",
@@ -208,7 +208,11 @@ export const registerStorageItemRoutes = async (
       const body = createStorageItemBodySchema.parse(request.body);
       const token = getAccessToken(request.headers.authorization);
       const me = await authService.getMe(token);
-      const data = await service.create(params.projectId, body, me.id);
+      const data = await service.create(params.projectId, body, {
+        id: me.id,
+        name: me.name,
+        avatarUrl: me.avatarUrl,
+      });
       return reply.status(201).send({ ok: true, data });
     }
   );

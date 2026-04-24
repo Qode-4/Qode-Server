@@ -1,17 +1,16 @@
 import { HttpError } from "../../common/http-error.js";
-import type { AuthRepository } from "../auth/auth.repository.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import type { StorageItemRepository } from "./storage-item.repository.js";
 import type {
   CreateStorageItemInput,
+  StorageItemCreator,
   UpdateStorageItemInput,
 } from "./storage-item.types.js";
 
 export class StorageItemService {
   constructor(
     private readonly repository: StorageItemRepository,
-    private readonly projectRepository: ProjectRepository,
-    private readonly authRepository: AuthRepository
+    private readonly projectRepository: ProjectRepository
   ) {}
 
   async list(projectId: string, currentUserId: string) {
@@ -31,18 +30,10 @@ export class StorageItemService {
   async create(
     projectId: string,
     input: CreateStorageItemInput,
-    currentUserId: string
+    creator: StorageItemCreator
   ) {
-    await this.assertProjectMember(projectId, currentUserId);
-    const creator = await this.authRepository.findById(currentUserId);
-    if (!creator) {
-      throw new HttpError(401, "인증이 만료되었습니다. 다시 로그인해 주세요.");
-    }
-    return this.repository.create(projectId, input, {
-      id: creator.id,
-      name: creator.name,
-      avatarUrl: creator.avatarUrl,
-    });
+    await this.assertProjectMember(projectId, creator.id);
+    return this.repository.create(projectId, input, creator);
   }
 
   async updateOrThrow(

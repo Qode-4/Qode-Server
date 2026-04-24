@@ -60,7 +60,7 @@ export class InMemoryStorageItemRepository implements StorageItemRepository {
       type: input.type,
       title: input.title,
       url: input.url,
-      metadata: input.metadata as StorageItemMetadata,
+      metadata: input.metadata,
       createdBy: { id: creator.id, name: creator.name, avatarUrl: creator.avatarUrl },
       createdAt: now,
       updatedAt: now,
