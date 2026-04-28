@@ -448,6 +448,27 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS storage_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('github_repo','figma','figjam')),
+      title VARCHAR(200) NOT NULL,
+      url TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_by UUID NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT storage_items_project_url_unique UNIQUE (project_id, url)
+    )
+  `);
+ 
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS storage_items_project_created_idx
+    ON storage_items (project_id, created_at DESC)
+  `);
+};
+  
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sections (
       id UUID PRIMARY KEY,
       project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

@@ -23,6 +23,11 @@ import { InMemoryProjectRepository, PgProjectRepository, type ProjectRepository 
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
+import { registerStorageItemRoutes } from "./modules/storage-item/storage-item.route.js";
+import {
+  InMemoryStorageItemRepository,
+  PgStorageItemRepository,
+} from "./modules/storage-item/storage-item.repository.js";
 import { PgSectionRepository } from "./modules/section/section.repository.js";
 import { registerSectionRoutes } from "./modules/section/section.route.js";
 
@@ -93,6 +98,9 @@ if (dbPool) {
 const sampleItemRepository = dbPool
   ? new PgSampleItemRepository(dbPool)
   : new InMemorySampleItemRepository();
+const storageItemRepository = dbPool
+  ? new PgStorageItemRepository(dbPool)
+  : new InMemoryStorageItemRepository();
 const projectRepository = dbPool
   ? new PgProjectRepository(dbPool)
   : new InMemoryProjectRepository();
@@ -164,6 +172,11 @@ if (dbPool) {
     syncCoordinator,
     projectAnalysisService: projectAnalysisService ?? undefined,
   });
+  await registerStorageItemRoutes(app, {
+    repository: storageItemRepository,
+    projectRepository: projectRepository as ProjectRepository,
+    authRepository,
+  });
   if (projectAnalysisService) {
     await registerProjectAnalysisRoutes(app, {
       analysisService: projectAnalysisService,
@@ -187,6 +200,11 @@ if (dbPool) {
     authRepository,
     syncCoordinator,
     projectAnalysisService: projectAnalysisService ?? undefined,
+  });
+  await registerStorageItemRoutes(app, {
+    repository: storageItemRepository,
+    projectRepository: projectRepository as ProjectRepository,
+    authRepository,
   });
 }
 if (dbPool) {
