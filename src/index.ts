@@ -10,6 +10,8 @@ import { InMemoryAuthRepository, PgAuthRepository } from "./modules/auth/auth.re
 import { createChatRepository } from "./modules/chat/chat.repository.js";
 import { registerChatRoutes } from "./modules/chat/chat.route.js";
 import { initializeCoreSchema } from "./modules/core-schema/core-schema.repository.js";
+import { PgFolderRepository } from "./modules/folder/folder.repository.js";
+import { registerFolderRoutes } from "./modules/folder/folder.route.js";
 import { registerGithubOauthRoutes } from "./modules/github-oauth/github-oauth.route.js";
 import { PgGithubOauthRepository } from "./modules/github-oauth/github-oauth.repository.js";
 import { GithubOauthService } from "./modules/github-oauth/github-oauth.service.js";
@@ -21,6 +23,8 @@ import { InMemoryProjectRepository, PgProjectRepository, type ProjectRepository 
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
+import { PgSectionRepository } from "./modules/section/section.repository.js";
+import { registerSectionRoutes } from "./modules/section/section.route.js";
 
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
@@ -147,6 +151,8 @@ await registerAuthRoutes(app, { repository: authRepository });
 if (dbPool) {
   const githubOauthRepository = new PgGithubOauthRepository(dbPool);
   const githubOauthService = new GithubOauthService(githubOauthRepository);
+  const sectionRepository = new PgSectionRepository(dbPool);
+  const folderRepository = new PgFolderRepository(dbPool);
   await registerGithubOauthRoutes(app, {
     repository: githubOauthRepository,
     authRepository,
@@ -164,6 +170,17 @@ if (dbPool) {
       authRepository,
     });
   }
+  await registerSectionRoutes(app, {
+    repository: sectionRepository,
+    projectRepository,
+    authRepository,
+  });
+  await registerFolderRoutes(app, {
+    repository: folderRepository,
+    sectionRepository,
+    projectRepository,
+    authRepository,
+  });
 } else {
   await registerProjectRoutes(app, {
     repository: projectRepository,
