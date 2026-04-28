@@ -461,12 +461,11 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
       CONSTRAINT storage_items_project_url_unique UNIQUE (project_id, url)
     )
   `);
- 
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS storage_items_project_created_idx
     ON storage_items (project_id, created_at DESC)
   `);
-};
   
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sections (
