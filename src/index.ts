@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { registerErrorHandler } from "./common/error-handler.js";
@@ -34,7 +34,7 @@ import { registerSectionRoutes } from "./modules/section/section.route.js";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 
-// ?뷀듃由ы룷?명듃?먯꽌 Fastify ?깆쓣 ?앹꽦?섍퀬 紐⑤뱢???곌껐?⑸땲??
+// 엔트리포인트에서 Fastify 앱을 생성하고 모듈을 연결합니다.
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
 });
@@ -72,8 +72,7 @@ app.addHook("onRequest", async (request, reply) => {
   reply.code(204).send();
 });
 
-
-// swagger-ui 
+// Swagger UI 문서를 노출합니다.
 await app.register(swagger, {
   openapi: {
     info: {
@@ -90,11 +89,11 @@ await app.register(swaggerUi, {
 
 const dbPool = getDbPool();
 if (dbPool) {
-  // Postgres ?ъ슜 ???꾩슂???뚯씠釉붿씠 議댁옱?섎룄濡?蹂댁옣?⑸땲??
+  // Postgres 사용 시 필요한 코어 스키마가 존재하도록 보장합니다.
   await initializeCoreSchema(dbPool);
 }
 
-// ?ㅽ뻾 ?섍꼍???곕씪 ??μ냼 援ы쁽泥대? ?꾪솚?⑸땲??
+// 실행 환경에 따라 저장소 구현체를 선택합니다.
 const sampleItemRepository = dbPool
   ? new PgSampleItemRepository(dbPool)
   : new InMemorySampleItemRepository();
