@@ -2,7 +2,9 @@ import "dotenv/config";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { registerErrorHandler } from "./common/error-handler.js";
+import { HttpError } from "./common/http-error.js";
 import { env } from "./config/env.js";
+import { AnalysisServerClient } from "./lib/analysis-server-client.js";
 import { closeDbPool, getDbPool } from "./lib/db.js";
 import { OpenAiClient } from "./lib/openai-client.js";
 import { registerAuthRoutes } from "./modules/auth/auth.route.js";
@@ -104,6 +106,13 @@ const projectRepository = dbPool
   ? new PgProjectRepository(dbPool)
   : new InMemoryProjectRepository();
 const authRepository = dbPool ? new PgAuthRepository(dbPool) : new InMemoryAuthRepository();
+const analysisServerClient =
+  env.ANALYSIS_SERVER_URL && env.ANALYSIS_SERVER_INTERNAL_TOKEN
+    ? new AnalysisServerClient({
+        baseUrl: env.ANALYSIS_SERVER_URL,
+        internalToken: env.ANALYSIS_SERVER_INTERNAL_TOKEN,
+      })
+    : null;
 const openAiClient = env.OPENAI_API_KEY
   ? new OpenAiClient({
       apiKey: env.OPENAI_API_KEY,
@@ -116,11 +125,15 @@ const projectAnalysisService =
     ? new ProjectAnalysisService(projectAnalysisRepository, projectRepository as ProjectRepository, openAiClient)
     : null;
 const syncCoordinator = new ProjectSyncCoordinator(projectRepository as ProjectRepository, {
-  onJobCompleted: projectAnalysisService
-    ? async ({ projectId, syncedCommit }) => {
-        await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+  onJobCompleted: analysisServerClient
+    ? async ({ projectId, syncJobId }) => {
+        await analysisServerClient.startIndexJob({ projectId, syncJobId });
       }
-    : undefined,
+    : projectAnalysisService
+      ? async ({ projectId, syncedCommit }) => {
+          await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+        }
+      : undefined,
 });
 
 app.get(
@@ -150,6 +163,64 @@ app.get(
       storage: dbPool ? "postgres" : "memory",
       now: new Date().toISOString(),
     };
+  }
+);
+
+app.get(
+  "/internal/analysis-server/health",
+  {
+    schema: {
+      tags: ["system"],
+      summary: "Check analysis server health through Qode Server",
+      headers: {
+        type: "object",
+        properties: {
+          "x-qode-internal-token": { type: "string" },
+        },
+        required: ["x-qode-internal-token"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            service: { type: "string" },
+            analysisServer: { type: "string" },
+            now: { type: "string", format: "date-time" },
+          },
+          required: ["ok", "service", "analysisServer", "now"],
+        },
+      },
+    },
+  },
+  async (request, reply) => {
+    const internalToken = request.headers["x-qode-internal-token"];
+    const actualToken = Array.isArray(internalToken) ? internalToken[0] : internalToken;
+    if (
+      !env.ANALYSIS_SERVER_INTERNAL_TOKEN ||
+      !actualToken ||
+      actualToken !== env.ANALYSIS_SERVER_INTERNAL_TOKEN
+    ) {
+      throw new HttpError(401, "Unauthorized internal request");
+    }
+
+    if (!analysisServerClient || !env.ANALYSIS_SERVER_URL) {
+      throw new HttpError(503, "Analysis server is not configured");
+    }
+
+    try {
+      await analysisServerClient.checkHealth();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Analysis server health check failed";
+      throw new HttpError(503, message);
+    }
+
+    return reply.send({
+      ok: true,
+      service: "qode-server",
+      analysisServer: env.ANALYSIS_SERVER_URL,
+      now: new Date().toISOString(),
+    });
   }
 );
 
