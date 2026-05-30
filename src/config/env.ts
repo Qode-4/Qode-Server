@@ -60,6 +60,14 @@ const envSchema = z.object({
   GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1),
   GITHUB_OAUTH_SCOPES: z.string().min(1).default("repo read:user"),
   TOKEN_ENCRYPTION_KEY: z.string().min(1),
+  ANALYSIS_SERVER_URL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().url().optional()
+  ),
+  ANALYSIS_SERVER_INTERNAL_TOKEN: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(1).optional()
+  ),
   SYNC_REPO_BASE_DIR: z.string().min(1).default("./.data/repos"),
   SYNC_WORKER_ENABLED: booleanFromEnv.default(true),
   SYNC_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
