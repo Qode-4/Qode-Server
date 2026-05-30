@@ -44,7 +44,7 @@ const envSchema = z.object({
   ]),
   DATABASE_URL: z.preprocess(
     (value) => (value === "" ? undefined : value),
-    z.string().url().optional()
+    z.string().url()
   ),
   DATABASE_SSL_MODE: z.enum(["disable", "require", "verify-full"]).default("require"),
   DATABASE_SSL_REJECT_UNAUTHORIZED: booleanFromEnv.default(false),
@@ -79,8 +79,3 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
-
-// 운영 환경에서 외부 DB 설정 누락으로 잘못 기동되는 것을 방지합니다.
-if (env.NODE_ENV === "production" && !env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set in production");
-}

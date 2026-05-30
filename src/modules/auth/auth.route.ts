@@ -2,11 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { HttpError } from "../../common/http-error.js";
 import { env } from "../../config/env.js";
 import { loginBodySchema, signupBodySchema } from "./auth.schema.js";
-import { InMemoryAuthRepository, type AuthRepository } from "./auth.repository.js";
+import type { AuthRepository } from "./auth.repository.js";
 import { AuthService } from "./auth.service.js";
 
 type RouteDeps = {
-  repository?: AuthRepository;
+  repository: AuthRepository;
 };
 
 const REFRESH_COOKIE_NAME = "refreshToken";
@@ -22,9 +22,8 @@ const getRefreshCookieClearOptions = () => ({
   path: "/",
 });
 
-export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps = {}) => {
-  const repository = deps.repository ?? new InMemoryAuthRepository();
-  const service = new AuthService(repository);
+export const registerAuthRoutes = async (app: FastifyInstance, deps: RouteDeps) => {
+  const service = new AuthService(deps.repository);
 
   const authUserSchema = {
     type: "object",

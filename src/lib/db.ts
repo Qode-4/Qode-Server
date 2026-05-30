@@ -5,15 +5,14 @@ import { env } from "../config/env.js";
 
 let pool: Pool | null = null;
 
-export const getDbPool = (): Pool | null => {
-  // 로컬/메모리 모드에서는 URL이 없으면 DB 초기화를 건너뜁니다.
-  if (!env.DATABASE_URL) {
-    return null;
-  }
+const LOCAL_DB_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
+export const getDbPool = (): Pool => {
   // 프로세스 전역에서 싱글톤 풀을 지연 초기화해 재사용합니다.
   if (!pool) {
     const parsedUrl = new URL(env.DATABASE_URL);
+    const isLocalDevelopmentDb =
+      env.NODE_ENV === "development" && LOCAL_DB_HOSTS.has(parsedUrl.hostname);
     // 연결 문자열의 SSL 파라미터가 앱 레벨 SSL 정책을 덮어쓰지 않도록 제거합니다.
     parsedUrl.searchParams.delete("sslmode");
     parsedUrl.searchParams.delete("sslcert");
@@ -26,7 +25,7 @@ export const getDbPool = (): Pool | null => {
         : undefined;
 
     const sslConfig =
-      env.DATABASE_SSL_MODE === "disable"
+      isLocalDevelopmentDb || env.DATABASE_SSL_MODE === "disable"
         ? false
         : {
             rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED,

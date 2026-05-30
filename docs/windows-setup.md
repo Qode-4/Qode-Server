@@ -70,15 +70,45 @@ cd Qode-Server
 pnpm install
 ```
 
-## 8. 환경변수 파일 생성
+## 8. 로컬 PostgreSQL 준비
+
+로컬 개발 서버는 기본적으로 로컬 PostgreSQL DB를 사용합니다.
+
+```powershell
+winget install --id PostgreSQL.PostgreSQL.16 -e
+```
+
+설치 시 사용자/비밀번호를 설정한 뒤 새 PowerShell에서 DB를 생성합니다.
+
+```powershell
+createdb qode_server
+```
+
+기본 접속 URL은 아래와 같습니다.
+
+```text
+postgresql://postgres:postgres@localhost:5432/qode_server
+```
+
+설치 시 지정한 비밀번호가 다르면 `DATABASE_URL`을 로컬 환경에 맞게 수정합니다.
+
+## 9. 환경변수 파일 생성
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-현재는 DB 준비 전이라 `.env`의 `DATABASE_URL`은 비워둬도 개발 서버 실행이 가능합니다.
+로컬 DB는 TLS 없이 접속하므로 `DATABASE_SSL_MODE=disable`을 사용합니다.
 
-## 9. 개발 서버 실행
+개인 로컬 DB 계정이 기본값과 다르면 `.env.local`을 만들고 아래처럼 덮어씁니다.
+이 파일은 git에 커밋되지 않습니다.
+
+```powershell
+DATABASE_URL=postgresql://postgres:내비밀번호@localhost:5432/qode_server
+DATABASE_SSL_MODE=disable
+```
+
+## 10. 개발 서버 실행
 
 ```powershell
 pnpm dev
@@ -92,7 +122,7 @@ curl http://localhost:3000/health
 
 정상 예시: `ok: true`
 
-## 10. 필수 점검 명령
+## 11. 필수 점검 명령
 
 ```powershell
 pnpm typecheck

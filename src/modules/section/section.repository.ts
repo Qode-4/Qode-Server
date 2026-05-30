@@ -1,6 +1,5 @@
 import type { Pool } from "pg";
 import { HttpError } from "../../common/http-error.js";
-import type { Folder } from "../folder/folder.types.js";
 import type {
   CreateSectionInput,
   Section,
@@ -14,105 +13,6 @@ export interface SectionRepository {
   create(projectId: string, input: CreateSectionInput): Promise<Section>;
   update(sectionId: string, input: UpdateSectionInput): Promise<Section | null>;
   delete(sectionId: string): Promise<boolean>;
-}
-
-export type SectionFolderMemoryState = {
-  sections: Map<string, Section>;
-  folders: Map<string, Folder>;
-};
-
-export const createSectionFolderMemoryState = (): SectionFolderMemoryState => ({
-  sections: new Map<string, Section>(),
-  folders: new Map<string, Folder>(),
-});
-
-export class InMemorySectionRepository implements SectionRepository {
-  constructor(
-    private readonly state: SectionFolderMemoryState = createSectionFolderMemoryState()
-  ) {}
-
-  async listTreeByProject(projectId: string): Promise<SectionTreeItem[]> {
-    const foldersBySectionId = new Map<string, Folder[]>();
-
-    for (const folder of this.state.folders.values()) {
-      const list = foldersBySectionId.get(folder.sectionId) ?? [];
-      list.push(folder);
-      foldersBySectionId.set(folder.sectionId, list);
-    }
-
-    return Array.from(this.state.sections.values())
-      .filter((section) => section.projectId === projectId)
-      .sort((a, b) => a.name.localeCompare(b.name, "ko"))
-      .map((section) => ({
-        ...section,
-        folders: (foldersBySectionId.get(section.id) ?? []).sort((a, b) =>
-          a.name.localeCompare(b.name, "ko")
-        ),
-      }));
-  }
-
-  async findById(sectionId: string): Promise<Section | null> {
-    return this.state.sections.get(sectionId) ?? null;
-  }
-
-  async create(projectId: string, input: CreateSectionInput): Promise<Section> {
-    const duplicate = Array.from(this.state.sections.values()).find(
-      (section) => section.projectId === projectId && section.name === input.name
-    );
-    if (duplicate) {
-      throw new HttpError(409, "이미 같은 이름의 섹션이 있습니다.");
-    }
-
-    const now = new Date().toISOString();
-    const section: Section = {
-      id: crypto.randomUUID(),
-      projectId,
-      name: input.name,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.state.sections.set(section.id, section);
-    return section;
-  }
-
-  async update(sectionId: string, input: UpdateSectionInput): Promise<Section | null> {
-    const current = this.state.sections.get(sectionId);
-    if (!current) {
-      return null;
-    }
-
-    const duplicate = Array.from(this.state.sections.values()).find(
-      (section) =>
-        section.id !== sectionId &&
-        section.projectId === current.projectId &&
-        section.name === input.name
-    );
-    if (duplicate) {
-      throw new HttpError(409, "이미 같은 이름의 섹션이 있습니다.");
-    }
-
-    const next: Section = {
-      ...current,
-      name: input.name,
-      updatedAt: new Date().toISOString(),
-    };
-    this.state.sections.set(sectionId, next);
-    return next;
-  }
-
-  async delete(sectionId: string): Promise<boolean> {
-    const deleted = this.state.sections.delete(sectionId);
-    if (!deleted) {
-      return false;
-    }
-
-    for (const [folderId, folder] of this.state.folders.entries()) {
-      if (folder.sectionId === sectionId) {
-        this.state.folders.delete(folderId);
-      }
-    }
-    return true;
-  }
 }
 
 type SectionRow = {
