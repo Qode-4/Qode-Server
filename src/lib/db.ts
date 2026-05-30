@@ -7,12 +7,7 @@ let pool: Pool | null = null;
 
 const LOCAL_DB_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
-export const getDbPool = (): Pool | null => {
-  // 테스트/명시적 메모리 모드에서는 URL이 없으면 DB 초기화를 건너뜁니다.
-  if (!env.DATABASE_URL) {
-    return null;
-  }
-
+export const getDbPool = (): Pool => {
   // 프로세스 전역에서 싱글톤 풀을 지연 초기화해 재사용합니다.
   if (!pool) {
     const parsedUrl = new URL(env.DATABASE_URL);

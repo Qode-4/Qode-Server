@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../../common/http-error.js";
-import { InMemoryAuthRepository, type AuthRepository } from "../auth/auth.repository.js";
+import type { AuthRepository } from "../auth/auth.repository.js";
 import { AuthService } from "../auth/auth.service.js";
 import { flowIdParamSchema, listReposQuerySchema } from "./github-oauth.schema.js";
 import { PgGithubOauthRepository } from "./github-oauth.repository.js";
@@ -8,15 +8,14 @@ import { GithubOauthService } from "./github-oauth.service.js";
 
 type RouteDeps = {
   repository: PgGithubOauthRepository;
-  authRepository?: AuthRepository;
+  authRepository: AuthRepository;
 };
 
 export const registerGithubOauthRoutes = async (
   app: FastifyInstance,
   deps: RouteDeps
 ) => {
-  const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
-  const authService = new AuthService(authRepository);
+  const authService = new AuthService(deps.authRepository);
   const service = new GithubOauthService(deps.repository);
   const authHeaderSchema = {
     type: "object",

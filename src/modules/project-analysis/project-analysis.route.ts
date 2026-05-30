@@ -1,21 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../../common/http-error.js";
-import { InMemoryAuthRepository, type AuthRepository } from "../auth/auth.repository.js";
+import type { AuthRepository } from "../auth/auth.repository.js";
 import { AuthService } from "../auth/auth.service.js";
 import { projectIdParamSchema } from "../project/project.schema.js";
 import { ProjectAnalysisService } from "./project-analysis.service.js";
 
 type RouteDeps = {
   analysisService: ProjectAnalysisService;
-  authRepository?: AuthRepository;
+  authRepository: AuthRepository;
 };
 
 export const registerProjectAnalysisRoutes = async (
   app: FastifyInstance,
   deps: RouteDeps
 ) => {
-  const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
-  const authService = new AuthService(authRepository);
+  const authService = new AuthService(deps.authRepository);
   const authHeaderSchema = {
     type: "object",
     properties: {

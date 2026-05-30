@@ -4,23 +4,18 @@ import {
   sampleItemIdParamSchema,
   updateSampleItemBodySchema,
 } from "./sample-item.schema.js";
-import {
-  InMemorySampleItemRepository,
-  type SampleItemRepository,
-} from "./sample-item.repository.js";
+import type { SampleItemRepository } from "./sample-item.repository.js";
 import { SampleItemService } from "./sample-item.service.js";
 
 type RouteDeps = {
-  repository?: SampleItemRepository;
+  repository: SampleItemRepository;
 };
 
 export const registerSampleItemRoutes = async (
   app: FastifyInstance,
-  deps: RouteDeps = {}
+  deps: RouteDeps
 ) => {
-  // 별도 설정이 없으면 로컬 실행을 위해 메모리 저장소를 기본 사용합니다.
-  const repository = deps.repository ?? new InMemorySampleItemRepository();
-  const service = new SampleItemService(repository);
+  const service = new SampleItemService(deps.repository);
 
   const sampleItemSchema = {
     type: "object",

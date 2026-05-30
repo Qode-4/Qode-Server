@@ -1,16 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../../common/http-error.js";
-import {
-  InMemoryAuthRepository,
-  type AuthRepository,
-} from "../auth/auth.repository.js";
+import type { AuthRepository } from "../auth/auth.repository.js";
 import { AuthService } from "../auth/auth.service.js";
 import type { ProjectRepository } from "../project/project.repository.js";
-import { InMemoryProjectRepository } from "../project/project.repository.js";
-import {
-  InMemoryStorageItemRepository,
-  type StorageItemRepository,
-} from "./storage-item.repository.js";
+import type { StorageItemRepository } from "./storage-item.repository.js";
 import {
   createStorageItemBodySchema,
   storageItemIdParamSchema,
@@ -20,20 +13,17 @@ import {
 import { StorageItemService } from "./storage-item.service.js";
 
 type RouteDeps = {
-  repository?: StorageItemRepository;
-  projectRepository?: ProjectRepository;
-  authRepository?: AuthRepository;
+  repository: StorageItemRepository;
+  projectRepository: ProjectRepository;
+  authRepository: AuthRepository;
 };
 
 export const registerStorageItemRoutes = async (
   app: FastifyInstance,
-  deps: RouteDeps = {}
+  deps: RouteDeps
 ) => {
-  const repository = deps.repository ?? new InMemoryStorageItemRepository();
-  const projectRepository = deps.projectRepository ?? new InMemoryProjectRepository();
-  const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
-  const authService = new AuthService(authRepository);
-  const service = new StorageItemService(repository, projectRepository);
+  const authService = new AuthService(deps.authRepository);
+  const service = new StorageItemService(deps.repository, deps.projectRepository);
 
   const authHeaderSchema = {
     type: "object",

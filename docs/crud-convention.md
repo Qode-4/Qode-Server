@@ -26,7 +26,7 @@ src/
 - `schema`: 요청 검증(zod)
 - `route`: HTTP 입출력 처리, schema 호출
 - `service`: 비즈니스 로직, 예외 처리
-- `repository`: 데이터 접근 계층(DB/in-memory 교체 지점)
+- `repository`: 데이터 접근 계층(PostgreSQL 구현과 인터페이스 경계)
 - `common`: 공통 에러/핸들러
 
 ## 구현 규칙
@@ -36,8 +36,8 @@ src/
 3. `repository`는 인터페이스를 두고 구현체를 분리
 4. 에러 응답은 `HttpError` + `registerErrorHandler`로 통일
 
-현재 샘플은 `DATABASE_URL`이 설정되면 PostgreSQL 저장소(`PgSampleItemRepository`)를 사용하고,
-설정되지 않으면 in-memory 저장소로 동작합니다.
+현재 샘플은 PostgreSQL 저장소(`PgSampleItemRepository`)를 사용합니다.
+로컬 개발에서도 `DATABASE_URL`을 설정해야 서버가 기동됩니다.
 
 ## 샘플 엔드포인트
 
