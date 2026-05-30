@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./config/load-env.js";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { registerErrorHandler } from "./common/error-handler.js";
