@@ -81,7 +81,7 @@ winget install --id PostgreSQL.PostgreSQL.16 -e
 설치 시 사용자/비밀번호를 설정한 뒤 새 PowerShell에서 DB를 생성합니다.
 
 ```powershell
-createdb qode_server
+& "C:\Program Files\PostgreSQL\16\bin\createdb.exe" -U postgres qode_server
 ```
 
 기본 접속 URL은 아래와 같습니다.
@@ -91,6 +91,14 @@ postgresql://postgres:postgres@localhost:5432/qode_server
 ```
 
 설치 시 지정한 비밀번호가 다르면 `DATABASE_URL`을 로컬 환경에 맞게 수정합니다.
+
+`createdb` 명령이 인식되지 않으면 PostgreSQL `bin` 폴더가 PATH에 잡히지 않은 상태입니다.
+현재 PowerShell 창에서만 임시로 잡으려면 아래를 실행한 뒤 다시 시도합니다.
+
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+createdb -U postgres qode_server
+```
 
 ## 9. 환경변수 파일 생성
 
