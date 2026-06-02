@@ -21,11 +21,11 @@ import { InMemoryProjectRepository, PgProjectRepository, type ProjectRepository 
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
+import { initSocketServer } from "./lib/socket/socket.server.js"
 
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 
-// ?뷀듃由ы룷?명듃?먯꽌 Fastify ?깆쓣 ?앹꽦?섍퀬 紐⑤뱢???곌껐?⑸땲??
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
 });
@@ -81,11 +81,9 @@ await app.register(swaggerUi, {
 
 const dbPool = getDbPool();
 if (dbPool) {
-  // Postgres ?ъ슜 ???꾩슂???뚯씠釉붿씠 議댁옱?섎룄濡?蹂댁옣?⑸땲??
   await initializeCoreSchema(dbPool);
 }
 
-// ?ㅽ뻾 ?섍꼍???곕씪 ??μ냼 援ы쁽泥대? ?꾪솚?⑸땲??
 const sampleItemRepository = dbPool
   ? new PgSampleItemRepository(dbPool)
   : new InMemorySampleItemRepository();
@@ -172,6 +170,7 @@ if (dbPool) {
     projectAnalysisService: projectAnalysisService ?? undefined,
   });
 }
+let chatRepository: ReturnType<typeof createChatRepository> | null = null
 if (dbPool) {
   const chatRepository = createChatRepository(dbPool);
   await registerChatRoutes(app, {
@@ -242,6 +241,7 @@ app.addHook("onClose", async () => {
 const start = async () => {
   try {
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
+    initSocketServer(app, chatRepository) // 소켓 연결
   } catch (error) {
     app.log.error(error);
     process.exit(1);
