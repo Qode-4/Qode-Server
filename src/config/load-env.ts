@@ -1,5 +1,7 @@
 import { config } from "dotenv";
 
-for (const path of [".env", ".env.local"]) {
-  config({ path, override: true });
+config({ path: ".env", override: true });
+
+if (process.env.NODE_ENV !== "production") {
+  config({ path: ".env.local", override: true });
 }
