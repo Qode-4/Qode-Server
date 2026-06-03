@@ -64,6 +64,10 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().url().optional()
   ),
+  RAG_SERVICE_URL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().url().default("http://localhost:8000")
+  ),
   ANALYSIS_SERVER_INTERNAL_TOKEN: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional()

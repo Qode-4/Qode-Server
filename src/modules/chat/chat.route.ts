@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { HttpError } from "../../common/http-error.js";
+import { env } from "../../config/env.js";
 import { AuthService } from "../auth/auth.service.js";
 import type { AuthRepository } from "../auth/auth.repository.js";
+import type { SourceInfo } from "../rag/rag.types.js";
 import { createChatRepository } from "./chat.repository.js";
 import {
   chatIdParamSchema,
@@ -21,10 +23,12 @@ type StreamAssistantInput = {
   content: string;
 };
 
+type StreamAssistantOutput = string | { type: "sources"; sources: SourceInfo[] };
+
 type RouteDeps = {
   repository: ChatRepository;
   authRepository: AuthRepository;
-  streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<string>;
+  streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<StreamAssistantOutput>;
 };
 
 type ChatRow = {
@@ -270,6 +274,12 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       const body = sendUserMessageBodySchema.parse(request.body);
       const userId = await getRequestUserId(request);
 
+      const origin = request.headers.origin;
+      if (origin && env.CORS_ALLOWED_ORIGINS.includes(origin)) {
+        reply.raw.setHeader("Vary", "Origin");
+        reply.raw.setHeader("Access-Control-Allow-Origin", origin);
+        reply.raw.setHeader("Access-Control-Allow-Credentials", "true");
+      }
       reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
       reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
       reply.raw.setHeader("Connection", "keep-alive");
@@ -305,13 +315,20 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         }
 
         let fullContent = "";
-        for await (const token of deps.streamAssistant({
+        for await (const chunk of deps.streamAssistant({
           chatId: params.id,
           userId,
           content: body.content,
         })) {
-          fullContent += token;
-          sendEvent("token", { token });
+          if (typeof chunk === "string") {
+            fullContent += chunk;
+            sendEvent("token", { token: chunk });
+            continue;
+          }
+
+          if (chunk.type === "sources") {
+            sendEvent("sources", { sources: chunk.sources });
+          }
         }
 
         if (!assistantMessageId) {
