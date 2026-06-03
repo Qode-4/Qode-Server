@@ -23,6 +23,12 @@ import { ProjectAnalysisService } from "./modules/project-analysis/project-analy
 import { registerProjectRoutes } from "./modules/project/project.route.js";
 import { PgProjectRepository } from "./modules/project/project.repository.js";
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
+import {
+  buildRagMessages,
+  formatResponse,
+  RagSearchClient,
+  trimContext,
+} from "./modules/rag/rag.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
 import { registerStorageItemRoutes } from "./modules/storage-item/storage-item.route.js";
@@ -107,6 +113,9 @@ const openAiClient = env.OPENAI_API_KEY
     })
   : null;
 const projectAnalysisRepository = new PgProjectAnalysisRepository(dbPool);
+const ragSearchClient = new RagSearchClient({
+  baseUrl: env.RAG_SERVICE_URL,
+});
 const projectAnalysisService =
   openAiClient
     ? new ProjectAnalysisService(projectAnalysisRepository, projectRepository, openAiClient)
@@ -278,45 +287,24 @@ await registerChatRoutes(app, {
       return;
     }
 
-    const analysis = await projectAnalysisRepository.findByProjectId(chat.project_id);
+    const searchResult = await ragSearchClient.searchChunks(content, chat.project_id, 5);
+    const trimmedSearchResult = {
+      ...searchResult,
+      chunks: trimContext(searchResult.chunks, 8_000),
+    };
     const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
-    const openAiMessages = [
-      {
-        role: "system" as const,
-        content: [
-          "You are Qode coding assistant.",
-          "Use only the provided project analysis cache as ground truth.",
-          "If information is not in cache, say it is not present in analysis cache.",
-          "",
-          "Project analysis cache:",
-          analysis?.status === "ready" && analysis.summary
-            ? JSON.stringify(analysis.summary)
-            : "analysis cache is unavailable.",
-        ].join("\n"),
-      },
-      ...recentMessages
-        .filter((message) => message.content.trim().length > 0)
-        .map((message) => ({
-          role:
-            message.role === "USER"
-              ? ("user" as const)
-              : message.role === "ASSISTANT"
-                ? ("assistant" as const)
-                : ("system" as const),
-          content: message.content,
-        })),
-    ];
+    const openAiMessages = buildRagMessages(trimmedSearchResult, content, recentMessages);
 
-    if (!openAiMessages.some((item) => item.role === "user" && item.content === content)) {
-      openAiMessages.push({
-        role: "user",
-        content,
-      });
-    }
-
+    let fullContent = "";
     for await (const token of openAiClient.streamChat(openAiMessages)) {
+      fullContent += token;
       yield token;
     }
+
+    yield {
+      type: "sources",
+      sources: formatResponse(fullContent, searchResult).sources,
+    };
   },
 });
 
