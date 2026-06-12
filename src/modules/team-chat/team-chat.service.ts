@@ -49,7 +49,7 @@ export class TeamChatService {
     async getRoomsByProject(projectId: string, currentUserId: string) {
         const exists = await this.projectRepository.existsById(projectId);
         if (!exists) {
-            throw new HttpError(404, "");
+            throw new HttpError(404, "프로젝트를 찾을 수 없습니다.");
         }
         
         const myRole = await this.projectRepository.findMemberRole(projectId, currentUserId);
