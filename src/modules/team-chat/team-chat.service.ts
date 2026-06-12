@@ -109,4 +109,18 @@ export class TeamChatService {
             role: "MEMBER",
         });
     }
+
+    async getParticipants(chatId: string, currentUserId: string) {
+        const room = await this.repository.getRoom(chatId);
+        if (!room) {
+            throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
+        }
+
+        const myRole = await this.projectRepository.findMemberRole(room.projectId, currentUserId);
+        if (!myRole) {
+            throw new HttpError(403, "접근 권한이 없습니다.");
+        }
+
+        return this.repository.getParticipants(chatId);
+    }
 }
