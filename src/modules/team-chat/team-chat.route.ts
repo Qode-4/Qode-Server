@@ -1,7 +1,7 @@
 
-import { InMemoryTeamChatRepository, TeamChatRepository } from "./team-chat.repository.js";
-import { InMemoryProjectRepository, ProjectRepository } from "../project/project.repository.js";
-import { AuthRepository, InMemoryAuthRepository } from "../auth/auth.repository.js";
+import { TeamChatRepository } from "./team-chat.repository.js";
+import { ProjectRepository } from "../project/project.repository.js";
+import { AuthRepository } from "../auth/auth.repository.js";
 import { FastifyInstance } from "fastify";
 import { AuthService } from "../auth/auth.service.js";
 import { TeamChatService } from "./team-chat.service.js";
@@ -9,20 +9,17 @@ import { HttpError } from "../../common/http-error.js";
 import { chatIdParamSchema, projectIdParamSchema, createRoomBodySchema, getMessagesQuerySchema, addParticipantBodySchema } from "../team-chat/team-chat.schema.js";
 
 type RouteDeps = {
-    repository?: TeamChatRepository;
-    projectRepository?: ProjectRepository;
-    authRepository?: AuthRepository;
+    repository: TeamChatRepository;
+    projectRepository: ProjectRepository;
+    authRepository: AuthRepository;
 };
 
 export const registerTeamChatRoutes = async (
     app: FastifyInstance,
-    deps: RouteDeps = {}
+    deps: RouteDeps
 ) => {
-    const repository = deps.repository ?? new InMemoryTeamChatRepository();
-    const projectRepository = deps.projectRepository ?? new InMemoryProjectRepository();
-    const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
-    const authService = new AuthService(authRepository);
-    const service = new TeamChatService(repository, projectRepository);
+    const authService = new AuthService(deps.authRepository);
+    const service = new TeamChatService(deps.repository, deps.projectRepository);
 
     const authHeaderSchema = {
         type: "object",

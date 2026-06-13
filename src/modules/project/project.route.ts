@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { HttpError } from "../../common/http-error.js";
 import { env } from "../../config/env.js";
-import { InMemoryAuthRepository, type AuthRepository } from "../auth/auth.repository.js";
+import type { AuthRepository } from "../auth/auth.repository.js";
 import { AuthService } from "../auth/auth.service.js";
 import type { ProjectAnalysisService } from "../project-analysis/project-analysis.service.js";
 import {
@@ -13,31 +13,28 @@ import {
   projectSyncJobParamSchema,
   projectSyncStatusParamSchema,
 } from "./project.schema.js";
-import {
-  InMemoryProjectRepository,
-  type ProjectRepository,
-} from "./project.repository.js";
+import type { ProjectRepository } from "./project.repository.js";
 import type { GithubOauthService } from "../github-oauth/github-oauth.service.js";
 import { ProjectSyncCoordinator, ProjectSyncService } from "./project-sync.service.js";
 import { ProjectService } from "./project.service.js";
 
 type RouteDeps = {
-  repository?: ProjectRepository;
-  authRepository?: AuthRepository;
-  syncCoordinator?: ProjectSyncCoordinator;
+  repository: ProjectRepository;
+  authRepository: AuthRepository;
+  syncCoordinator: ProjectSyncCoordinator;
   githubOauthService?: GithubOauthService;
   projectAnalysisService?: ProjectAnalysisService;
 };
 
 export const registerProjectRoutes = async (
   app: FastifyInstance,
-  deps: RouteDeps = {}
+  deps: RouteDeps
 ) => {
-  const repository = deps.repository ?? new InMemoryProjectRepository();
-  const authRepository = deps.authRepository ?? new InMemoryAuthRepository();
+  const repository = deps.repository;
+  const authRepository = deps.authRepository;
   const authService = new AuthService(authRepository);
   const service = new ProjectService(repository, authRepository);
-  const syncCoordinator = deps.syncCoordinator ?? new ProjectSyncCoordinator(repository);
+  const syncCoordinator = deps.syncCoordinator;
   const syncService = new ProjectSyncService(repository, syncCoordinator);
   const reposRoot = resolve(process.cwd(), env.SYNC_REPO_BASE_DIR);
   const authHeaderSchema = {

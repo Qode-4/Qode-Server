@@ -87,15 +87,41 @@ cd Qode-Server
 pnpm install
 ```
 
-## 9. 환경변수 파일 생성
+## 9. 로컬 PostgreSQL 준비
+
+로컬 개발 서버는 기본적으로 로컬 PostgreSQL DB를 사용합니다.
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb qode_server
+```
+
+기본 접속 URL은 아래와 같습니다.
+
+```text
+postgresql://postgres:postgres@localhost:5432/qode_server
+```
+
+사용자/비밀번호가 다르면 `DATABASE_URL`을 로컬 환경에 맞게 수정합니다.
+
+## 10. 환경변수 파일 생성
 
 ```bash
 cp .env.example .env
 ```
 
-현재는 DB 준비 전이라 `.env`의 `DATABASE_URL`은 비워둬도 개발 서버 실행이 가능합니다.
+로컬 DB는 TLS 없이 접속하므로 `DATABASE_SSL_MODE=disable`을 사용합니다.
 
-## 10. 개발 서버 실행
+개인 로컬 DB 계정이 기본값과 다르면 `.env.local`을 만들고 아래처럼 덮어씁니다.
+이 파일은 git에 커밋되지 않습니다.
+
+```bash
+DATABASE_URL=postgresql://내맥사용자명@localhost:5432/qode_server
+DATABASE_SSL_MODE=disable
+```
+
+## 11. 개발 서버 실행
 
 ```bash
 pnpm dev
@@ -109,7 +135,7 @@ curl http://localhost:3000/health
 
 정상 예시: `ok: true`
 
-## 11. 필수 점검 명령
+## 12. 필수 점검 명령
 
 ```bash
 pnpm typecheck

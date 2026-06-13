@@ -1,15 +1,19 @@
-﻿import "dotenv/config";
+﻿import "./config/load-env.js";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { registerErrorHandler } from "./common/error-handler.js";
+import { HttpError } from "./common/http-error.js";
 import { env } from "./config/env.js";
+import { AnalysisServerClient } from "./lib/analysis-server-client.js";
 import { closeDbPool, getDbPool } from "./lib/db.js";
 import { OpenAiClient } from "./lib/openai-client.js";
 import { registerAuthRoutes } from "./modules/auth/auth.route.js";
-import { InMemoryAuthRepository, PgAuthRepository } from "./modules/auth/auth.repository.js";
+import { PgAuthRepository } from "./modules/auth/auth.repository.js";
 import { createChatRepository } from "./modules/chat/chat.repository.js";
 import { registerChatRoutes } from "./modules/chat/chat.route.js";
 import { initializeCoreSchema } from "./modules/core-schema/core-schema.repository.js";
+import { PgFolderRepository } from "./modules/folder/folder.repository.js";
+import { registerFolderRoutes } from "./modules/folder/folder.route.js";
 import { registerGithubOauthRoutes } from "./modules/github-oauth/github-oauth.route.js";
 import { PgGithubOauthRepository } from "./modules/github-oauth/github-oauth.repository.js";
 import { GithubOauthService } from "./modules/github-oauth/github-oauth.service.js";
@@ -17,14 +21,26 @@ import { registerProjectAnalysisRoutes } from "./modules/project-analysis/projec
 import { PgProjectAnalysisRepository } from "./modules/project-analysis/project-analysis.repository.js";
 import { ProjectAnalysisService } from "./modules/project-analysis/project-analysis.service.js";
 import { registerProjectRoutes } from "./modules/project/project.route.js";
-import { InMemoryProjectRepository, PgProjectRepository, type ProjectRepository } from "./modules/project/project.repository.js";
+import { PgProjectRepository } from "./modules/project/project.repository.js";
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
+import {
+  buildRagMessages,
+  formatResponse,
+  RagSearchClient,
+  trimContext,
+} from "./modules/rag/rag.service.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
-import { InMemorySampleItemRepository, PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
-import { initSocketServer } from "./lib/socket/socket.server.js"
+import { PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
+import { registerStorageItemRoutes } from "./modules/storage-item/storage-item.route.js";
+import { PgStorageItemRepository } from "./modules/storage-item/storage-item.repository.js";
+import { PgSectionRepository } from "./modules/section/section.repository.js";
+import { registerSectionRoutes } from "./modules/section/section.route.js";
 
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
+import { initSocketServer } from "./lib/socket/socket.server.js";
+import { PgTeamChatRepository } from "./modules/team-chat/team-chat.repository.js";
+import { registerTeamChatRoutes } from "./modules/team-chat/team-chat.route.js";
 
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
@@ -63,8 +79,7 @@ app.addHook("onRequest", async (request, reply) => {
   reply.code(204).send();
 });
 
-
-// swagger-ui 
+// Swagger UI 문서를 노출합니다.
 await app.register(swagger, {
   openapi: {
     info: {
@@ -80,34 +95,44 @@ await app.register(swaggerUi, {
 });
 
 const dbPool = getDbPool();
-if (dbPool) {
-  await initializeCoreSchema(dbPool);
-}
+await initializeCoreSchema(dbPool);
 
-const sampleItemRepository = dbPool
-  ? new PgSampleItemRepository(dbPool)
-  : new InMemorySampleItemRepository();
-const projectRepository = dbPool
-  ? new PgProjectRepository(dbPool)
-  : new InMemoryProjectRepository();
-const authRepository = dbPool ? new PgAuthRepository(dbPool) : new InMemoryAuthRepository();
+const sampleItemRepository = new PgSampleItemRepository(dbPool);
+const storageItemRepository = new PgStorageItemRepository(dbPool);
+const projectRepository = new PgProjectRepository(dbPool);
+const authRepository = new PgAuthRepository(dbPool);
+
+const analysisServerClient =
+  env.ANALYSIS_SERVER_URL && env.ANALYSIS_SERVER_INTERNAL_TOKEN
+    ? new AnalysisServerClient({
+        baseUrl: env.ANALYSIS_SERVER_URL,
+        internalToken: env.ANALYSIS_SERVER_INTERNAL_TOKEN,
+      })
+    : null;
 const openAiClient = env.OPENAI_API_KEY
   ? new OpenAiClient({
       apiKey: env.OPENAI_API_KEY,
       model: env.OPENAI_MODEL,
     })
   : null;
-const projectAnalysisRepository = dbPool ? new PgProjectAnalysisRepository(dbPool) : null;
+const projectAnalysisRepository = new PgProjectAnalysisRepository(dbPool);
+const ragSearchClient = new RagSearchClient({
+  baseUrl: env.RAG_SERVICE_URL,
+});
 const projectAnalysisService =
-  projectAnalysisRepository && openAiClient
-    ? new ProjectAnalysisService(projectAnalysisRepository, projectRepository as ProjectRepository, openAiClient)
+  openAiClient
+    ? new ProjectAnalysisService(projectAnalysisRepository, projectRepository, openAiClient)
     : null;
-const syncCoordinator = new ProjectSyncCoordinator(projectRepository as ProjectRepository, {
-  onJobCompleted: projectAnalysisService
-    ? async ({ projectId, syncedCommit }) => {
-        await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+const syncCoordinator = new ProjectSyncCoordinator(projectRepository, {
+  onJobCompleted: analysisServerClient
+    ? async ({ projectId, syncJobId }) => {
+        await analysisServerClient.startIndexJob({ projectId, syncJobId });
       }
-    : undefined,
+    : projectAnalysisService
+      ? async ({ projectId, syncedCommit }) => {
+          await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+        }
+      : undefined,
 });
 
 app.get(
@@ -122,116 +147,178 @@ app.get(
           properties: {
             ok: { type: "boolean" },
             service: { type: "string" },
-            storage: { type: "string", enum: ["postgres", "memory"] },
+            database: {
+              type: "object",
+              properties: {
+                ok: { type: "boolean" },
+                type: { type: "string", enum: ["postgres"] },
+              },
+              required: ["ok", "type"],
+            },
             now: { type: "string", format: "date-time" },
           },
-          required: ["ok", "service", "storage", "now"],
+          required: ["ok", "service", "database", "now"],
         },
       },
     },
   },
   async () => {
+    await dbPool.query("SELECT 1");
     return {
       ok: true,
       service: "qode-server",
-      storage: dbPool ? "postgres" : "memory",
+      database: {
+        ok: true,
+        type: "postgres",
+      },
       now: new Date().toISOString(),
     };
   }
 );
 
-await registerSampleItemRoutes(app, { repository: sampleItemRepository });
-await registerAuthRoutes(app, { repository: authRepository });
-if (dbPool) {
-  const githubOauthRepository = new PgGithubOauthRepository(dbPool);
-  const githubOauthService = new GithubOauthService(githubOauthRepository);
-  await registerGithubOauthRoutes(app, {
-    repository: githubOauthRepository,
-    authRepository,
-  });
-  await registerProjectRoutes(app, {
-    repository: projectRepository,
-    authRepository,
-    githubOauthService,
-    syncCoordinator,
-    projectAnalysisService: projectAnalysisService ?? undefined,
-  });
-  if (projectAnalysisService) {
-    await registerProjectAnalysisRoutes(app, {
-      analysisService: projectAnalysisService,
-      authRepository,
+app.get(
+  "/internal/analysis-server/health",
+  {
+    schema: {
+      tags: ["system"],
+      summary: "Check analysis server health through Qode Server",
+      headers: {
+        type: "object",
+        properties: {
+          "x-qode-internal-token": { type: "string" },
+        },
+        required: ["x-qode-internal-token"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            service: { type: "string" },
+            analysisServer: { type: "string" },
+            now: { type: "string", format: "date-time" },
+          },
+          required: ["ok", "service", "analysisServer", "now"],
+        },
+      },
+    },
+  },
+  async (request, reply) => {
+    const internalToken = request.headers["x-qode-internal-token"];
+    const actualToken = Array.isArray(internalToken) ? internalToken[0] : internalToken;
+    if (
+      !env.ANALYSIS_SERVER_INTERNAL_TOKEN ||
+      !actualToken ||
+      actualToken !== env.ANALYSIS_SERVER_INTERNAL_TOKEN
+    ) {
+      throw new HttpError(401, "Unauthorized internal request");
+    }
+
+    if (!analysisServerClient || !env.ANALYSIS_SERVER_URL) {
+      throw new HttpError(503, "Analysis server is not configured");
+    }
+
+    try {
+      await analysisServerClient.checkHealth();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Analysis server health check failed";
+      throw new HttpError(503, message);
+    }
+
+    return reply.send({
+      ok: true,
+      service: "qode-server",
+      analysisServer: env.ANALYSIS_SERVER_URL,
+      now: new Date().toISOString(),
     });
   }
-} else {
-  await registerProjectRoutes(app, {
-    repository: projectRepository,
+);
+
+await registerSampleItemRoutes(app, { repository: sampleItemRepository });
+await registerAuthRoutes(app, { repository: authRepository });
+const githubOauthRepository = new PgGithubOauthRepository(dbPool);
+const githubOauthService = new GithubOauthService(githubOauthRepository);
+const sectionRepository = new PgSectionRepository(dbPool);
+const folderRepository = new PgFolderRepository(dbPool);
+
+await registerGithubOauthRoutes(app, {
+  repository: githubOauthRepository,
+  authRepository,
+});
+await registerProjectRoutes(app, {
+  repository: projectRepository,
+  authRepository,
+  githubOauthService,
+  syncCoordinator,
+  projectAnalysisService: projectAnalysisService ?? undefined,
+});
+await registerStorageItemRoutes(app, {
+  repository: storageItemRepository,
+  projectRepository,
+  authRepository,
+});
+if (projectAnalysisService) {
+  await registerProjectAnalysisRoutes(app, {
+    analysisService: projectAnalysisService,
     authRepository,
-    syncCoordinator,
-    projectAnalysisService: projectAnalysisService ?? undefined,
   });
 }
-let chatRepository: ReturnType<typeof createChatRepository> | null = null
-if (dbPool) {
-  const chatRepository = createChatRepository(dbPool);
-  await registerChatRoutes(app, {
-    repository: chatRepository,
-    authRepository,
-    streamAssistant: async function* ({ chatId, content }) {
-      if (!openAiClient) {
-        yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
-        return;
-      }
 
-      const chat = await chatRepository.getChatById(chatId);
-      if (!chat) {
-        yield "채팅방을 찾을 수 없습니다.";
-        return;
-      }
+await registerSectionRoutes(app, {
+  repository: sectionRepository,
+  projectRepository,
+  authRepository,
+});
+await registerFolderRoutes(app, {
+  repository: folderRepository,
+  sectionRepository,
+  projectRepository,
+  authRepository,
+});
 
-      const analysis = projectAnalysisRepository
-        ? await projectAnalysisRepository.findByProjectId(chat.project_id)
-        : null;
-      const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
-      const openAiMessages = [
-        {
-          role: "system" as const,
-          content: [
-            "You are Qode coding assistant.",
-            "Use only the provided project analysis cache as ground truth.",
-            "If information is not in cache, say it is not present in analysis cache.",
-            "",
-            "Project analysis cache:",
-            analysis?.status === "ready" && analysis.summary
-              ? JSON.stringify(analysis.summary)
-              : "analysis cache is unavailable.",
-          ].join("\n"),
-        },
-        ...recentMessages
-          .filter((message) => message.content.trim().length > 0)
-          .map((message) => ({
-            role:
-              message.role === "USER"
-                ? ("user" as const)
-                : message.role === "ASSISTANT"
-                  ? ("assistant" as const)
-                  : ("system" as const),
-            content: message.content,
-          })),
-      ];
+const chatRepository = createChatRepository(dbPool);
+await registerChatRoutes(app, {
+  repository: chatRepository,
+  authRepository,
+  streamAssistant: async function* ({ chatId, content }) {
+    if (!openAiClient) {
+      yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
+      return;
+    }
 
-      if (!openAiMessages.some((item) => item.role === "user" && item.content === content)) {
-        openAiMessages.push({
-          role: "user",
-          content,
-        });
-      }
+    const chat = await chatRepository.getChatById(chatId);
+    if (!chat) {
+      yield "채팅방을 찾을 수 없습니다.";
+      return;
+    }
 
-      for await (const token of openAiClient.streamChat(openAiMessages)) {
-        yield token;
-      }
-    },
-  });
-}
+    const searchResult = await ragSearchClient.searchChunks(content, chat.project_id, 5);
+    const trimmedSearchResult = {
+      ...searchResult,
+      chunks: trimContext(searchResult.chunks, 8_000),
+    };
+    const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
+    const openAiMessages = buildRagMessages(trimmedSearchResult, content, recentMessages);
+
+    let fullContent = "";
+    for await (const token of openAiClient.streamChat(openAiMessages)) {
+      fullContent += token;
+      yield token;
+    }
+
+    yield {
+      type: "sources",
+      sources: formatResponse(fullContent, searchResult).sources,
+    };
+  },
+});
+
+const teamChatRepository = new PgTeamChatRepository(dbPool);
+await registerTeamChatRoutes(app, {
+  repository: teamChatRepository,
+  projectRepository,
+  authRepository,
+});
 
 // 정상 종료 시 DB 연결을 정리합니다.
 app.addHook("onClose", async () => {
