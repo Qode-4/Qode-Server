@@ -28,6 +28,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.1",
     "@types/pg": "^8.15.4",
+    "socket.io-client": "^4.8.3",
     "tsx": "^4.19.2",
     "typescript": "^5.9.0",
     "vitest": "^4.1.8"

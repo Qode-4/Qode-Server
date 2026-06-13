@@ -75,6 +75,11 @@ export interface TeamChatRepository {
         limit: number;
         before?: Date;
     }): Promise<TeamChatMessage[]>;
+    insertMessage(params: {
+        chatId: string;
+        userId: string;
+        content: string;
+    }): Promise<TeamChatMessage>;
     getParticipants(chatId: string): Promise<TeamChatParticipant[]>;
     addParticipant(params: {
         chatId: string;
@@ -188,6 +193,31 @@ export class PgTeamChatRepository implements TeamChatRepository {
             [params.chatId, params.limit, params.before ?? null]
         );
         return rows.map(toMessage);
+    }
+
+    async insertMessage(params: { chatId: string; userId: string; content: string; }): Promise<TeamChatMessage> {
+        const id = crypto.randomUUID();
+        
+        await this.pool.query(
+            `INSERT INTO messages (id, chat_id, user_id, content, role)
+            VALUES ($1, $2, $3, $4, 'USER')`,
+            [id, params.chatId, params.userId, params.content]
+        );
+
+        const { rows } = await this.pool.query<MessageRow>(
+            `SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+                    u.name AS user_name, u.avatar_url
+            FROM messages m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.id = $1`,
+            [id]
+        );
+
+        if (!rows[0]) {
+            throw new Error("Failed to insert message");
+        }
+
+        return toMessage(rows[0]);
     }
 
     async getParticipants(chatId: string): Promise<TeamChatParticipant[]> {

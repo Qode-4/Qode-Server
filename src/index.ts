@@ -328,7 +328,7 @@ app.addHook("onClose", async () => {
 const start = async () => {
   try {
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
-    initSocketServer(app, chatRepository) // 소켓 연결
+    initSocketServer(app, chatRepository, teamChatRepository) // 소켓 연결
   } catch (error) {
     app.log.error(error);
     process.exit(1);
