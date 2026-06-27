@@ -145,6 +145,20 @@ docker run -d --name qode-test-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=t
 pnpm vitest run src/modules/team-chat/team-chat.repository.test.ts
 ```
 
+## 카프카 설치
+
+```
+docker run -d --name kafka -p 9092:9092 apache/kafka:latest
+docker ps | findstr kafka
+pnpm add kafkajs
+```
+
+## 카프카 토픽 생성
+
+```
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh --create --topic team-chat-message --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
+```
+
 ## 자주 발생하는 문제
 
 1. `nvm` 명령이 안 잡힘

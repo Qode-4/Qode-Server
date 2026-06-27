@@ -188,7 +188,7 @@ export class PgTeamChatRepository implements TeamChatRepository {
             JOIN users u ON u.id = m.user_id
             WHERE m.chat_id = $1
                 AND ($3::timestamptz IS NULL OR m.created_at < $3)
-            ORDER BY m.created_at DESC
+            ORDER BY m.created_at ASC
             LIMIT $2`,
             [params.chatId, params.limit, params.before ?? null]
         );
