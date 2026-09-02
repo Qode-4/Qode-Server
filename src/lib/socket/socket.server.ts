@@ -33,6 +33,7 @@ export async function initSocketServer(
                 roomId: string;
                 userId: string;
                 content: string;
+                socketId: string;
             };
 
             try {
@@ -42,8 +43,10 @@ export async function initSocketServer(
                     content: data.content,
                 });
 
-                io.to(data.roomId).emit("team:message:receive", saved);
-
+                console.log("소켓ID:", data.socketId);
+                console.log("저장된 메시지:", saved);
+                io.to(data.roomId).except(data.socketId).emit("team:message:receive", saved);
+                io.to(data.socketId).emit("team:message:sent", saved); // 발신자한테만 별도 이벤트
                 // 분석 서비스로 넘기는 부분 (나중에 추가)
             } catch (err) {
                 console.error("메시지 처리 실패:", err);
@@ -74,7 +77,7 @@ export async function initSocketServer(
             try {
                 await producer.send({
                     topic: TOPICS.TEAM_CHAT_MESSAGE,
-                    messages: [{ value: JSON.stringify(data) }],
+                    messages: [{ value: JSON.stringify({...data, socketId: socket.id}) }],
                 });
             } catch (err) {
                 socket.emit("team:message:error", { message: "메시지 전송 실패" });
