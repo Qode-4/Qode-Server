@@ -1,4 +1,4 @@
-import "./config/load-env.js";
+﻿import "./config/load-env.js";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { traceable } from "langsmith/traceable";
@@ -40,8 +40,10 @@ import { registerSectionRoutes } from "./modules/section/section.route.js";
 
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
+import { initSocketServer } from "./lib/socket/socket.server.js";
+import { PgTeamChatRepository } from "./modules/team-chat/team-chat.repository.js";
+import { registerTeamChatRoutes } from "./modules/team-chat/team-chat.route.js";
 
-// 엔트리포인트에서 Fastify 앱을 생성하고 모듈을 연결합니다.
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
 });
@@ -101,6 +103,7 @@ const sampleItemRepository = new PgSampleItemRepository(dbPool);
 const storageItemRepository = new PgStorageItemRepository(dbPool);
 const projectRepository = new PgProjectRepository(dbPool);
 const authRepository = new PgAuthRepository(dbPool);
+
 const analysisServerClient =
   env.ANALYSIS_SERVER_URL && env.ANALYSIS_SERVER_INTERNAL_TOKEN
     ? new AnalysisServerClient({
@@ -239,6 +242,7 @@ const githubOauthRepository = new PgGithubOauthRepository(dbPool);
 const githubOauthService = new GithubOauthService(githubOauthRepository);
 const sectionRepository = new PgSectionRepository(dbPool);
 const folderRepository = new PgFolderRepository(dbPool);
+
 await registerGithubOauthRoutes(app, {
   repository: githubOauthRepository,
   authRepository,
@@ -261,6 +265,7 @@ if (projectAnalysisService) {
     authRepository,
   });
 }
+
 await registerSectionRoutes(app, {
   repository: sectionRepository,
   projectRepository,
@@ -362,6 +367,13 @@ await registerChatRoutes(app, {
   streamAssistant: streamQodeRagAssistant,
 });
 
+const teamChatRepository = new PgTeamChatRepository(dbPool);
+await registerTeamChatRoutes(app, {
+  repository: teamChatRepository,
+  projectRepository,
+  authRepository,
+});
+
 // 정상 종료 시 DB 연결을 정리합니다.
 app.addHook("onClose", async () => {
   await closeDbPool();
@@ -369,6 +381,7 @@ app.addHook("onClose", async () => {
 
 const start = async () => {
   try {
+    await initSocketServer(app, chatRepository, teamChatRepository);
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
   } catch (error) {
     app.log.error(error);
