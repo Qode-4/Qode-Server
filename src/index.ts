@@ -1,6 +1,7 @@
 import "./config/load-env.js";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
+import { traceable } from "langsmith/traceable";
 import { registerErrorHandler } from "./common/error-handler.js";
 import { HttpError } from "./common/http-error.js";
 import { env } from "./config/env.js";
@@ -29,6 +30,7 @@ import {
   RagSearchClient,
   trimContext,
 } from "./modules/rag/rag.service.js";
+import type { PromptMessage, SearchResult } from "./modules/rag/rag.types.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
 import { PgSampleItemRepository } from "./modules/sample-item/sample-item.repository.js";
 import { registerStorageItemRoutes } from "./modules/storage-item/storage-item.route.js";
@@ -272,10 +274,45 @@ await registerFolderRoutes(app, {
 });
 
 const chatRepository = createChatRepository(dbPool);
-await registerChatRoutes(app, {
-  repository: chatRepository,
-  authRepository,
-  streamAssistant: async function* ({ chatId, content }) {
+const searchRagChunks = traceable(
+  async (input: { query: string; projectId: string; topK: number }) => {
+    return ragSearchClient.searchChunks(input.query, input.projectId, input.topK);
+  },
+  {
+    name: "rag_search",
+    run_type: "retriever",
+  }
+);
+const trimRagSearchResult = traceable(
+  (input: { searchResult: SearchResult; maxChars: number }) => ({
+    ...input.searchResult,
+    chunks: trimContext(input.searchResult.chunks, input.maxChars),
+  }),
+  {
+    name: "trim_rag_context",
+    run_type: "chain",
+  }
+);
+const buildRagPromptMessages = traceable(
+  (input: {
+    searchResult: SearchResult;
+    userQuestion: string;
+    chatHistory: PromptMessage[];
+  }) => buildRagMessages(input.searchResult, input.userQuestion, input.chatHistory),
+  {
+    name: "build_rag_prompt",
+    run_type: "prompt",
+  }
+);
+const streamQodeRagAssistant = traceable(
+  async function* ({
+    chatId,
+    content,
+  }: {
+    chatId: string;
+    userId: string;
+    content: string;
+  }) {
     if (!openAiClient) {
       yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
       return;
@@ -287,13 +324,21 @@ await registerChatRoutes(app, {
       return;
     }
 
-    const searchResult = await ragSearchClient.searchChunks(content, chat.project_id, 5);
-    const trimmedSearchResult = {
-      ...searchResult,
-      chunks: trimContext(searchResult.chunks, 8_000),
-    };
+    const searchResult = await searchRagChunks({
+      query: content,
+      projectId: chat.project_id,
+      topK: 5,
+    });
+    const trimmedSearchResult = await trimRagSearchResult({
+      searchResult,
+      maxChars: 8_000,
+    });
     const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
-    const openAiMessages = buildRagMessages(trimmedSearchResult, content, recentMessages);
+    const openAiMessages = await buildRagPromptMessages({
+      searchResult: trimmedSearchResult,
+      userQuestion: content,
+      chatHistory: recentMessages,
+    });
 
     let fullContent = "";
     for await (const token of openAiClient.streamChat(openAiMessages)) {
@@ -302,10 +347,19 @@ await registerChatRoutes(app, {
     }
 
     yield {
-      type: "sources",
+      type: "sources" as const,
       sources: formatResponse(fullContent, searchResult).sources,
     };
   },
+  {
+    name: "qode_rag_chat",
+    run_type: "chain",
+  }
+);
+await registerChatRoutes(app, {
+  repository: chatRepository,
+  authRepository,
+  streamAssistant: streamQodeRagAssistant,
 });
 
 // 정상 종료 시 DB 연결을 정리합니다.

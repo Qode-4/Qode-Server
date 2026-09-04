@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { traceable } from "langsmith/traceable";
 import type { ProjectAnalysisSummary } from "../modules/project-analysis/project-analysis.types.js";
 
 type OpenAiMessageRole = "system" | "user" | "assistant";
@@ -34,77 +35,95 @@ export class OpenAiClient {
   ) {}
 
   async *streamChat(messages: OpenAiMessage[]): AsyncGenerator<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 120_000);
+    const endpoint = this.endpoint;
+    const { apiKey, model, timeoutMs } = this.options;
 
-    try {
-      const response = await fetch(this.endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.options.apiKey}`,
-          "Content-Type": "application/json",
+    const streamOpenAiChat = traceable(
+      async function* (input: { messages: OpenAiMessage[] }): AsyncGenerator<string> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs ?? 120_000);
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model,
+              temperature: 0.2,
+              stream: true,
+              messages: input.messages,
+            }),
+            signal: controller.signal,
+          });
+
+          if (!response.ok || !response.body) {
+            const body = await response.text();
+            throw new Error(`OpenAI stream request failed: ${response.status} ${body.slice(0, 500)}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const chunks = buffer.split("\n\n");
+            buffer = chunks.pop() ?? "";
+
+            for (const chunk of chunks) {
+              const line = chunk
+                .split("\n")
+                .find((item) => item.startsWith("data: "));
+              if (!line) {
+                continue;
+              }
+
+              const data = line.slice("data: ".length).trim();
+              if (data === "[DONE]") {
+                return;
+              }
+
+              let parsed: {
+                choices?: Array<{ delta?: { content?: string } }>;
+              };
+              try {
+                parsed = JSON.parse(data) as {
+                  choices?: Array<{ delta?: { content?: string } }>;
+                };
+              } catch {
+                continue;
+              }
+
+              const token = parsed.choices?.[0]?.delta?.content;
+              if (token) {
+                yield token;
+              }
+            }
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      {
+        name: "openai_stream_chat",
+        run_type: "llm",
+        metadata: {
+          provider: "openai",
+          model,
+          streaming: true,
         },
-        body: JSON.stringify({
-          model: this.options.model,
-          temperature: 0.2,
-          stream: true,
-          messages,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        const body = await response.text();
-        throw new Error(`OpenAI stream request failed: ${response.status} ${body.slice(0, 500)}`);
       }
+    );
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-
-        for (const chunk of chunks) {
-          const line = chunk
-            .split("\n")
-            .find((item) => item.startsWith("data: "));
-          if (!line) {
-            continue;
-          }
-
-          const data = line.slice("data: ".length).trim();
-          if (data === "[DONE]") {
-            return;
-          }
-
-          let parsed: {
-            choices?: Array<{ delta?: { content?: string } }>;
-          };
-          try {
-            parsed = JSON.parse(data) as {
-              choices?: Array<{ delta?: { content?: string } }>;
-            };
-          } catch {
-            continue;
-          }
-
-          const token = parsed.choices?.[0]?.delta?.content;
-          if (token) {
-            yield token;
-          }
-        }
-      }
-    } finally {
-      clearTimeout(timer);
-    }
+    yield* streamOpenAiChat({ messages });
   }
 
   async generateProjectAnalysis(input: {
