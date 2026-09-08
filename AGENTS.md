@@ -128,4 +128,4 @@ JWT는 access + refresh 2종. `users.token_version`으로 전역 무효화, `use
 
 ## 참고 문서
 
-`docs/crud-convention.md`(CRUD 견본), `docs/windows-setup.md`·`docs/macos-setup.md`(초기 설치), `docs/aws-server.md`, `docs/task-subin-qa-langsmith.md`(RAG 질의응답 + LangSmith 설계).
+`docs/crud-convention.md`(CRUD 견본), `docs/windows-setup.md`·`docs/macos-setup.md`(초기 설치), `docs/aws-server.md`.
