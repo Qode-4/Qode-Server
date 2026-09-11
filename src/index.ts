@@ -374,10 +374,16 @@ const streamQodeRagAssistant = traceable(
     run_type: "chain",
   }
 );
+const generateChatTitleFn = openAiClient
+  ? (input: { userContent: string; assistantContent: string }) =>
+      openAiClient.generateChatTitle(input)
+  : undefined;
+
 await registerChatRoutes(app, {
   repository: chatRepository,
   authRepository,
   streamAssistant: streamQodeRagAssistant,
+  generateTitle: generateChatTitleFn,
 });
 
 const teamChatRepository = new PgTeamChatRepository(dbPool);

@@ -26,10 +26,16 @@ type StreamAssistantInput = {
 
 type StreamAssistantOutput = string | { type: "sources"; sources: SourceInfo[] };
 
+type GenerateTitleInput = {
+  userContent: string;
+  assistantContent: string;
+};
+
 type RouteDeps = {
   repository: ChatRepository;
   authRepository: AuthRepository;
   streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<StreamAssistantOutput>;
+  generateTitle?: (input: GenerateTitleInput) => Promise<string>;
 };
 
 type ChatRow = {
@@ -56,7 +62,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     throw new HttpError(503, "Chat repository is unavailable");
   }
 
-  const service = new ChatService(deps.repository);
+  const service = new ChatService(deps.repository, deps.generateTitle);
   const authService = new AuthService(deps.authRepository);
 
   const getRequestUserId = async (request: FastifyRequest) => {
@@ -385,6 +391,20 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           messageId: assistantMessageId,
           content: fullContent,
         });
+
+        try {
+          const titleResult = await service.maybeGenerateTitleForFirstTurn({
+            chatId: params.id,
+            userContent: body.content,
+            assistantContent: fullContent,
+          });
+          if (titleResult) {
+            sendEvent("title", { name: titleResult.name });
+          }
+        } catch {
+          // title 생성 실패는 대화 흐름을 막지 않는다. 이벤트 생략.
+        }
+
         sendEvent("done", { assistantMessageId });
       } catch (error) {
         if (assistantMessageId) {

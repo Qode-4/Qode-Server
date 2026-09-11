@@ -147,6 +147,12 @@ export function createChatRepository(pool: Pool) {
     return r.rows[0];
   }
 
+  async function countMessages(chatId: string): Promise<number> {
+    const q = `SELECT COUNT(*)::int AS count FROM messages WHERE chat_id = $1`;
+    const r = await pool.query(q, [chatId]);
+    return r.rows[0]?.count ?? 0;
+  }
+
   async function listRecentForPrompt(chatId: string, limit = 20): Promise<Array<{ role: MessageRole; content: string }>> {
     const q = `
       SELECT role, content
@@ -241,6 +247,7 @@ export function createChatRepository(pool: Pool) {
 
     // Messages
     insertMessage,
+    countMessages,
     listRecentForPrompt,
     finalizeMessage,
     failMessage,

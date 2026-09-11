@@ -55,8 +55,16 @@ type RenameMyChatInput = {
   name: string;
 };
 
+type GenerateTitleFn = (input: {
+  userContent: string;
+  assistantContent: string;
+}) => Promise<string>;
+
 export class ChatService {
-  constructor(private readonly repository: ChatRepository) {}
+  constructor(
+    private readonly repository: ChatRepository,
+    private readonly generateTitle?: GenerateTitleFn
+  ) {}
 
   private async getChatOrThrow(chatId: string) {
     const chat = await this.repository.getChatById(chatId);
@@ -175,5 +183,30 @@ export class ChatService {
   async listPromptMessages(input: ListPromptMessagesInput) {
     await this.assertChatAccess(input.chatId, input.userId);
     return this.repository.listRecentForPrompt(input.chatId, input.limit);
+  }
+
+  async maybeGenerateTitleForFirstTurn(input: {
+    chatId: string;
+    userContent: string;
+    assistantContent: string;
+  }): Promise<{ name: string } | null> {
+    if (!this.generateTitle) return null;
+    try {
+      const count = await this.repository.countMessages(input.chatId);
+      if (count !== 2) return null;
+
+      const raw = await this.generateTitle({
+        userContent: input.userContent,
+        assistantContent: input.assistantContent,
+      });
+      const name = raw.trim().slice(0, 20);
+      if (!name) return null;
+
+      const updated = await this.repository.updateChatName(input.chatId, name);
+      if (!updated) return null;
+      return { name };
+    } catch {
+      return null;
+    }
   }
 }
