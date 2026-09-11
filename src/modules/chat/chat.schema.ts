@@ -58,7 +58,7 @@ export const updateMessageBodySchema = z
   });
 
 export const renameChatBodySchema = z.object({
-  name: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(20),
 });
 
 export const sendUserMessageBodySchema = z.object({

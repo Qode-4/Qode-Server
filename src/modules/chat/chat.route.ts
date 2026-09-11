@@ -225,7 +225,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         body: {
           type: "object",
           properties: {
-            name: { type: "string", minLength: 1, maxLength: 100 },
+            name: { type: "string", minLength: 1, maxLength: 20 },
           },
           required: ["name"],
         },
