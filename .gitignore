@@ -162,3 +162,6 @@ dist
 
 # Local pnpm store config
 pnpm-workspace.yaml
+
+# oh-my-claudecode 로컬 상태
+.omc/
