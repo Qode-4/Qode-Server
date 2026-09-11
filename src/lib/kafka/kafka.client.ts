@@ -1,9 +1,10 @@
 // src/lib/kafka/kafka.client.ts
 import { Kafka } from "kafkajs";
+import { env } from "../../config/env.js";
 
 export const kafka = new Kafka({
     clientId: "qode-server",
-    brokers: ["localhost:9092"],
+    brokers: env.KAFKA_BROKERS.split(",").map((b) => b.trim()).filter(Boolean),
 });
 
 export const producer = kafka.producer();

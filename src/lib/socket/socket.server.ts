@@ -17,39 +17,49 @@ export async function initSocketServer(
         cors: { origin: "*" }
     });
 
-    // 프로듀서 연결
-    await producer.connect();
+    // Kafka 연결에 실패해도 API 서버는 계속 뜬다. 팀 채팅만 일시 중단된다.
+    // (재부팅 직후 Kafka가 아직 준비되지 않은 경우를 포함)
+    let kafkaReady = false;
 
-    // 컨슈머 연결 및 구독
-    await consumer.connect();
-    await consumer.subscribe({ topic: TOPICS.TEAM_CHAT_MESSAGE, fromBeginning: false });
+    try {
+        // 프로듀서 연결
+        await producer.connect();
 
-    // 컨슈머에서 DB 저장 + 브로드캐스트
-    await consumer.run({
-        eachMessage: async ({ message }) => {
-            if (!teamChatRepository || !message.value) return;
+        // 컨슈머 연결 및 구독
+        await consumer.connect();
+        await consumer.subscribe({ topic: TOPICS.TEAM_CHAT_MESSAGE, fromBeginning: false });
 
-            const data = JSON.parse(message.value.toString()) as {
-                roomId: string;
-                userId: string;
-                content: string;
-            };
+        // 컨슈머에서 DB 저장 + 브로드캐스트
+        await consumer.run({
+            eachMessage: async ({ message }) => {
+                if (!teamChatRepository || !message.value) return;
 
-            try {
-                const saved = await teamChatRepository.insertMessage({
-                    chatId: data.roomId,
-                    userId: data.userId,
-                    content: data.content,
-                });
+                const data = JSON.parse(message.value.toString()) as {
+                    roomId: string;
+                    userId: string;
+                    content: string;
+                };
 
-                io.to(data.roomId).emit("team:message:receive", saved);
+                try {
+                    const saved = await teamChatRepository.insertMessage({
+                        chatId: data.roomId,
+                        userId: data.userId,
+                        content: data.content,
+                    });
 
-                // 분석 서비스로 넘기는 부분 (나중에 추가)
-            } catch (err) {
-                console.error("메시지 처리 실패:", err);
-            }
-        },
-    });
+                    io.to(data.roomId).emit("team:message:receive", saved);
+
+                    // 분석 서비스로 넘기는 부분 (나중에 추가)
+                } catch (err) {
+                    console.error("메시지 처리 실패:", err);
+                }
+            },
+        });
+
+        kafkaReady = true;
+    } catch (err) {
+        app.log.warn({ err }, "Kafka 연결 실패 — 팀 채팅 일시 중단, API 서버는 계속 동작");
+    }
 
     io.on("connection", (socket) => {
         console.log("소켓 연결됨:", socket.id);
@@ -71,6 +81,11 @@ export async function initSocketServer(
 
         // 팀채팅 - 카프카로 produce만
         socket.on("team:message:send", async (data: { roomId: string; content: string; userId: string }) => {
+            if (!kafkaReady) {
+                socket.emit("team:message:error", { message: "채팅 서버 연결 중입니다. 잠시 후 다시 시도해주세요." });
+                return;
+            }
+
             try {
                 await producer.send({
                     topic: TOPICS.TEAM_CHAT_MESSAGE,
@@ -86,8 +101,9 @@ export async function initSocketServer(
         });
     });
 
-    // 서버 종료 시 정리
+    // 서버 종료 시 정리 (연결한 적이 없으면 끊을 것도 없다)
     app.addHook("onClose", async () => {
+        if (!kafkaReady) return;
         await producer.disconnect();
         await consumer.disconnect();
     });
