@@ -57,6 +57,10 @@ export const updateMessageBodySchema = z
     message: "At least one field is required",
   });
 
+export const renameChatBodySchema = z.object({
+  name: z.string().trim().min(1).max(100),
+});
+
 export const sendUserMessageBodySchema = z.object({
   content: z.string().trim().min(1).max(4000),
 });
