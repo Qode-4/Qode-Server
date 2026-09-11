@@ -2,6 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 import { HttpError } from "./http-error.js";
 
+type FastifyValidationError = Error & {
+  validation: unknown;
+  validationContext?: string;
+};
+
+const isFastifyValidationError = (error: unknown): error is FastifyValidationError =>
+  error instanceof Error && Array.isArray((error as { validation?: unknown }).validation);
+
 export const registerErrorHandler = (app: FastifyInstance) => {
   // 발생한 모든 에러를 일관된 API 응답 형식으로 정규화합니다.
   app.setErrorHandler((error, request, reply) => {
@@ -12,6 +20,16 @@ export const registerErrorHandler = (app: FastifyInstance) => {
         error: "BAD_REQUEST",
         message: "Request validation failed",
         details: error.issues,
+      });
+    }
+
+    if (isFastifyValidationError(error)) {
+      return reply.status(400).send({
+        status: 400,
+        ok: false,
+        error: "BAD_REQUEST",
+        message: error.message,
+        details: error.validation,
       });
     }
 
