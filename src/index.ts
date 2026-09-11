@@ -89,11 +89,24 @@ await app.register(swagger, {
       version: "0.1.0",
     },
     servers: [{ url: "/" }],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+    },
+    security: [{ bearerAuth: [] }],
   },
 });
 
 await app.register(swaggerUi, {
   routePrefix: "/docs",
+  uiConfig: {
+    persistAuthorization: true,
+  },
 });
 
 const dbPool = getDbPool();

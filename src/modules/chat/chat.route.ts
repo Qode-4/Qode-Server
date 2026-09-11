@@ -11,6 +11,7 @@ import {
   listMyChatsQuerySchema,
   listMessagesQuerySchema,
   listPromptMessagesQuerySchema,
+  renameChatBodySchema,
   sendUserMessageBodySchema,
 } from "./chat.schema.js";
 import { ChatService } from "./chat.service.js";
@@ -205,6 +206,51 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         name: body.name,
       });
       return reply.status(201).send({ ok: true, data: mapChat(data as ChatRow) });
+    }
+  );
+
+  app.patch(
+    "/api/chats/me/:id",
+    {
+      schema: {
+        tags: ["chat"],
+        summary: "Rename personal chat",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 20 },
+          },
+          required: ["name"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: chatItemSchema,
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = chatIdParamSchema.parse(request.params);
+      const body = renameChatBodySchema.parse(request.body);
+      const userId = await getRequestUserId(request);
+      const data = await service.renameMyChat({
+        chatId: params.id,
+        userId,
+        name: body.name,
+      });
+      return reply.send({ ok: true, data: mapChat(data as ChatRow) });
     }
   );
 
