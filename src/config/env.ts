@@ -80,6 +80,8 @@ const envSchema = z.object({
     z.string().min(1).optional()
   ),
   OPENAI_MODEL: z.string().min(1).default("gpt-4.1-mini"),
+  // Kafka 브로커 주소. 여러 개면 콤마로 구분합니다.
+  KAFKA_BROKERS: z.string().min(1).default("127.0.0.1:9092"),
 });
 
 export const env = envSchema.parse(process.env);
