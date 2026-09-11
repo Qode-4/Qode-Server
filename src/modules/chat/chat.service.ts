@@ -49,6 +49,12 @@ type DeleteMyChatInput = {
   userId: string;
 };
 
+type RenameMyChatInput = {
+  chatId: string;
+  userId: string;
+  name: string;
+};
+
 export class ChatService {
   constructor(private readonly repository: ChatRepository) {}
 
@@ -108,6 +114,22 @@ export class ChatService {
     if (!deleted) {
       throw new HttpError(404, "Chat not found");
     }
+  }
+
+  async renameMyChat(input: RenameMyChatInput) {
+    const chat = await this.getChatOrThrow(input.chatId);
+    if (chat.chat_type !== "PERSONAL") {
+      throw new HttpError(400, "Only PERSONAL chat can be renamed now");
+    }
+    if (chat.created_by !== input.userId) {
+      throw new HttpError(403, "Forbidden");
+    }
+
+    const updated = await this.repository.updateChatName(input.chatId, input.name);
+    if (!updated) {
+      throw new HttpError(404, "Chat not found");
+    }
+    return updated;
   }
 
   async sendUserMessage(input: SendUserMessageInput) {

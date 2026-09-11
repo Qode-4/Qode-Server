@@ -144,7 +144,11 @@ export class ProjectSyncCoordinator {
     private readonly options: {
       reposRoot?: string;
       maxConcurrency?: number;
-      onJobCompleted?: (input: { projectId: string; syncedCommit: string }) => Promise<void> | void;
+      onJobCompleted?: (input: {
+        projectId: string;
+        syncJobId: string;
+        syncedCommit: string;
+      }) => Promise<void> | void;
     } = {}
   ) {}
 
@@ -205,7 +209,11 @@ export class ProjectSyncCoordinator {
           if (this.removedProjectIds.has(job.projectId)) {
             return;
           }
-          await this.options.onJobCompleted?.({ projectId: job.projectId, syncedCommit });
+          await this.options.onJobCompleted?.({
+            projectId: job.projectId,
+            syncJobId: job.id,
+            syncedCommit,
+          });
         } catch {
           // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
         }

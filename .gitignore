@@ -1,6 +1,7 @@
 # ignore test files
 .data/
-scripts/
+# 하네스는 커밋한다 (재현 수단). 측정 산출물은 볼트 40-기록/측정/ 으로 간다
+scripts/*results*.csv
 
 
 # macOS system files
@@ -93,7 +94,6 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
-.env.example
 
 # TLS certificates
 certs/
@@ -161,3 +161,6 @@ dist
 
 # Local pnpm store config
 pnpm-workspace.yaml
+
+# oh-my-claudecode 로컬 상태
+.omc/

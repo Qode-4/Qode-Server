@@ -14,55 +14,6 @@ export interface SampleItemRepository {
   delete(id: string): Promise<boolean>;
 }
 
-export class InMemorySampleItemRepository implements SampleItemRepository {
-  // 로컬/개발 대체 모드에서 사용하는 프로세스 내 메모리 저장소입니다.
-  private readonly store = new Map<string, SampleItem>();
-
-  async list(): Promise<SampleItem[]> {
-    return Array.from(this.store.values()).sort((a, b) =>
-      a.createdAt < b.createdAt ? 1 : -1
-    );
-  }
-
-  async findById(id: string): Promise<SampleItem | null> {
-    return this.store.get(id) ?? null;
-  }
-
-  async create(input: CreateSampleItemInput): Promise<SampleItem> {
-    const now = new Date().toISOString();
-    const item: SampleItem = {
-      id: crypto.randomUUID(),
-      title: input.title,
-      description: input.description,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.store.set(item.id, item);
-    return item;
-  }
-
-  async update(id: string, input: UpdateSampleItemInput): Promise<SampleItem | null> {
-    const current = this.store.get(id);
-    if (!current) {
-      return null;
-    }
-
-    const next: SampleItem = {
-      ...current,
-      ...input,
-      updatedAt: new Date().toISOString(),
-    };
-
-    this.store.set(id, next);
-    return next;
-  }
-
-  async delete(id: string): Promise<boolean> {
-    return this.store.delete(id);
-  }
-}
-
 type SampleItemRow = {
   id: string;
   title: string;

@@ -69,6 +69,17 @@ export function createChatRepository(pool: Pool) {
     return (r.rowCount ?? 0) > 0;
   }
 
+  async function updateChatName(chatId: string, name: string) {
+    const q = `
+      UPDATE chats
+      SET name = $2
+      WHERE id = $1
+      RETURNING id, project_id, created_by, name, chat_type, created_at
+    `;
+    const r = await pool.query(q, [chatId, name]);
+    return r.rows[0] ?? null;
+  }
+
   // =========================
   // Participants (TEAM 권한 체크용)
   // =========================
@@ -221,6 +232,7 @@ export function createChatRepository(pool: Pool) {
     createChat,
     listChatsByProject,
     deleteChatById,
+    updateChatName,
 
     // Participants
     isActiveMember,

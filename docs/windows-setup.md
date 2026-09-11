@@ -70,15 +70,53 @@ cd Qode-Server
 pnpm install
 ```
 
-## 8. 환경변수 파일 생성
+## 8. 로컬 PostgreSQL 준비
+
+로컬 개발 서버는 기본적으로 로컬 PostgreSQL DB를 사용합니다.
+
+```powershell
+winget install --id PostgreSQL.PostgreSQL.16 -e
+```
+
+설치 시 사용자/비밀번호를 설정한 뒤 새 PowerShell에서 DB를 생성합니다.
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\createdb.exe" -U postgres qode_server
+```
+
+기본 접속 URL은 아래와 같습니다.
+
+```text
+postgresql://postgres:postgres@localhost:5432/qode_server
+```
+
+설치 시 지정한 비밀번호가 다르면 `DATABASE_URL`을 로컬 환경에 맞게 수정합니다.
+
+`createdb` 명령이 인식되지 않으면 PostgreSQL `bin` 폴더가 PATH에 잡히지 않은 상태입니다.
+현재 PowerShell 창에서만 임시로 잡으려면 아래를 실행한 뒤 다시 시도합니다.
+
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+createdb -U postgres qode_server
+```
+
+## 9. 환경변수 파일 생성
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-현재는 DB 준비 전이라 `.env`의 `DATABASE_URL`은 비워둬도 개발 서버 실행이 가능합니다.
+로컬 DB는 TLS 없이 접속하므로 `DATABASE_SSL_MODE=disable`을 사용합니다.
 
-## 9. 개발 서버 실행
+개인 로컬 DB 계정이 기본값과 다르면 `.env.local`을 만들고 아래처럼 덮어씁니다.
+이 파일은 git에 커밋되지 않습니다.
+
+```powershell
+DATABASE_URL=postgresql://postgres:내비밀번호@localhost:5432/qode_server
+DATABASE_SSL_MODE=disable
+```
+
+## 10. 개발 서버 실행
 
 ```powershell
 pnpm dev
@@ -92,11 +130,33 @@ curl http://localhost:3000/health
 
 정상 예시: `ok: true`
 
-## 10. 필수 점검 명령
+## 11. 필수 점검 명령
 
 ```powershell
 pnpm typecheck
 pnpm build
+```
+
+## 로컬 DB 켜서 테스트 하는 방법
+
+```
+docker rm -f qode-test-db
+docker run -d --name qode-test-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=test_db -p 5432:5432 postgres:16
+pnpm vitest run src/modules/team-chat/team-chat.repository.test.ts
+```
+
+## 카프카 설치
+
+```
+docker run -d --name kafka -p 9092:9092 apache/kafka:latest
+docker ps | findstr kafka
+pnpm add kafkajs
+```
+
+## 카프카 토픽 생성
+
+```
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh --create --topic team-chat-message --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 ```
 
 ## 자주 발생하는 문제

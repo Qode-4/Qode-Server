@@ -87,15 +87,76 @@ cd Qode-Server
 pnpm install
 ```
 
-## 9. 환경변수 파일 생성
+## 9. 로컬 PostgreSQL 준비
+
+로컬 개발 서버는 기본적으로 로컬 PostgreSQL DB를 사용합니다.
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb qode_server
+```
+
+기본 접속 URL은 아래와 같습니다.
+
+```text
+postgresql://postgres:postgres@localhost:5432/qode_server
+```
+
+사용자/비밀번호가 다르면 `DATABASE_URL`을 로컬 환경에 맞게 수정합니다.
+
+## 10. 환경변수 파일 생성
 
 ```bash
 cp .env.example .env
 ```
 
-현재는 DB 준비 전이라 `.env`의 `DATABASE_URL`은 비워둬도 개발 서버 실행이 가능합니다.
+로컬 DB는 TLS 없이 접속하므로 `DATABASE_SSL_MODE=disable`을 사용합니다.
 
-## 10. 개발 서버 실행
+개인 로컬 DB 계정이 기본값과 다르면 `.env.local`을 만들고 아래처럼 덮어씁니다.
+이 파일은 git에 커밋되지 않습니다.
+
+```bash
+DATABASE_URL=postgresql://내맥사용자명@localhost:5432/qode_server
+DATABASE_SSL_MODE=disable
+```
+
+## 11. 로컬 Kafka 준비
+
+팀 채팅 메시지가 Kafka를 거치므로, **Kafka가 떠 있지 않으면 `pnpm dev`가 실패합니다.**
+서버 기동 과정에서 브로커에 접속을 시도하고 실패하면 그대로 종료되기 때문에,
+팀 채팅과 무관한 작업을 하더라도 켜 두어야 합니다.
+
+Kafka 4.x는 KRaft 모드라 ZooKeeper를 따로 띄우지 않습니다. Docker도 필요 없습니다.
+
+```bash
+brew install kafka
+brew services start kafka
+```
+
+정상 동작 확인:
+
+```bash
+brew services list | grep kafka        # started 여야 합니다
+lsof -nP -iTCP:9092 -sTCP:LISTEN       # java가 9092를 잡고 있어야 합니다
+```
+
+토픽(`team-chat-message`)은 자동 생성되므로 보통 따로 만들지 않아도 됩니다.
+직접 확인하거나 만들려면 아래를 사용합니다. Homebrew로 설치한 CLI는 `.sh`가 붙지 않습니다.
+
+```bash
+kafka-topics --list --bootstrap-server localhost:9092
+kafka-topics --create --topic team-chat-message \
+  --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
+```
+
+브로커 주소는 소스에 `localhost:9092`로 고정되어 있어 환경변수로 바꿀 수 없습니다
+(`src/lib/kafka/kafka.client.ts`).
+
+설정 파일은 `$(brew --prefix)/etc/kafka/server.properties`,
+데이터는 `$(brew --prefix)/var/lib/kraft-combined-logs`에 있습니다.
+
+## 12. 개발 서버 실행
 
 ```bash
 pnpm dev
@@ -109,7 +170,7 @@ curl http://localhost:3000/health
 
 정상 예시: `ok: true`
 
-## 11. 필수 점검 명령
+## 13. 필수 점검 명령
 
 ```bash
 pnpm typecheck
@@ -130,6 +191,11 @@ pnpm build
 
 4. Apple Silicon(M1/M2/M3)에서 설치 경로 혼동
 - `brew --prefix` 결과 기준으로 사용 (`/opt/homebrew`가 일반적)
+
+5. Kafka는 켜져 있는데 `kafka-topics` 명령만 `bin/java: No such file or directory`로 실패
+- 브로커는 Homebrew가 자체 `openjdk`로 띄우지만, CLI는 셸의 `JAVA_HOME`을 따라갑니다
+- `~/.zshrc`에 지워진 JDK 경로가 남아 있는 경우이므로 아래로 교체합니다
+- `export JAVA_HOME=$(brew --prefix)/opt/openjdk`
 
 ## 팀 공통 규칙
 
