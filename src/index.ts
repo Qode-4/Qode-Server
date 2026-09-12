@@ -369,7 +369,7 @@ const streamQodeRagAssistant = traceable(
 
     yield {
       type: "sources" as const,
-      sources: formatResponse(fullContent, searchResult).sources,
+      sources: formatResponse(fullContent, trimmedSearchResult).sources,
     };
   },
   {
