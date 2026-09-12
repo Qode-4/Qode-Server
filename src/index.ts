@@ -102,12 +102,15 @@ await app.register(swagger, {
   },
 });
 
-await app.register(swaggerUi, {
-  routePrefix: "/docs",
-  uiConfig: {
-    persistAuthorization: true,
-  },
-});
+// 운영에서는 API 문서를 외부에 노출하지 않습니다.
+if (env.NODE_ENV !== "production") {
+  await app.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: {
+      persistAuthorization: true,
+    },
+  });
+}
 
 const dbPool = getDbPool();
 await initializeCoreSchema(dbPool);
