@@ -173,6 +173,13 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     ON project_members (user_id, project_id)
   `);
 
+  // legacy 폴백 컬럼을 새 코드 길이(16진수 10자리)에 맞춰 넓힙니다.
+  // 넓히지 않으면 프로젝트 생성이 22001(string_data_right_truncation)로 실패합니다.
+  await pool.query(`
+    ALTER TABLE projects
+    ALTER COLUMN invite_code TYPE VARCHAR(16)
+  `);
+
   // 초대 링크. projects.invite_code를 대체합니다.
   // expires_at은 만료 기능이 아니라 회수 자리입니다 — 발급 시 항상 NULL이고,
   // 회수할 때만 NOW()를 넣어 그 코드를 죽입니다.
