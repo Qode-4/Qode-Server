@@ -61,8 +61,9 @@ export const renameChatBodySchema = z.object({
   name: z.string().trim().min(1).max(20),
 });
 
+// 질문 최대 길이 2,000자 — 명세 E-1. FE ChatComposer 의 maxLength 와 같은 값이다.
 export const sendUserMessageBodySchema = z.object({
-  content: z.string().trim().min(1).max(4000),
+  content: z.string().trim().min(1).max(2000),
 });
 
 export const listMyChatsQuerySchema = z.object({
