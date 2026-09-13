@@ -140,7 +140,7 @@ describe("PgTeamChatRepository", () => {
             expect(rooms).toHaveLength(0);
         });
 
-        it("생성 시간 오름차순으로 정렬된다", async () => {
+        it("최신 생성순으로 정렬된다", async () => {
             const userId = await createTestUser("user@test.com");
             const projectId = await createTestProject(userId);
 
@@ -148,8 +148,8 @@ describe("PgTeamChatRepository", () => {
             await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "두번째", createdBy: userId });
 
             const rooms = await repo.getRoomsByProject(projectId);
-            expect(rooms[0]?.name).toBe("첫번째");
-            expect(rooms[1]?.name).toBe("두번째");
+            expect(rooms[0]?.name).toBe("두번째");
+            expect(rooms[1]?.name).toBe("첫번째");
         });
     });
 
