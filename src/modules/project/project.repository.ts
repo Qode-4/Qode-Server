@@ -28,6 +28,10 @@ export interface ProjectRepository {
   create(input: CreateProjectInput, creator: ProjectCreator): Promise<Project>;
   existsById(projectId: string): Promise<boolean>;
   findMemberRole(projectId: string, userId: string): Promise<ProjectRole | null>;
+  findProjectByInviteCode(code: string): Promise<{ id: string; name: string } | null>;
+  countMembers(projectId: string): Promise<number>;
+  reissueInvite(input: { projectId: string; actorId: string }): Promise<string>;
+  removeMember(projectId: string, userId: string): Promise<boolean>;
   createGitConnection(input: {
     projectId: string;
     provider: "github_oauth";
@@ -89,6 +93,10 @@ type ProjectSyncJobRow = {
   updated_at: Date;
 };
 
+// 초대 코드: 대문자 16진수 10자리. core-schema의 백필과 같은 길이를 씁니다.
+const generateInviteCode = (): string =>
+  crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+
 const toProject = (row: ProjectRow): Project => ({
   id: row.id,
   name: row.name,
@@ -136,7 +144,9 @@ export class PgProjectRepository implements ProjectRepository {
         p.name,
         p.description,
         p.git_url,
-        p.invite_code,
+        -- 활성 초대 코드. 백필이 코드 충돌로 건너뛴 행만 legacy 컬럼으로 떨어집니다
+        -- (reissueInvite가 회수와 발급을 한 트랜잭션에서 처리해 활성 코드가 비지 않습니다).
+        COALESCE(pi.code, p.invite_code) AS invite_code,
         p.last_synced_at,
         p.question_count,
         p.created_at,
@@ -150,6 +160,14 @@ export class PgProjectRepository implements ProjectRepository {
        AND pm.user_id = $1
       LEFT JOIN users u
         ON u.id = p.created_by_id
+      LEFT JOIN LATERAL (
+        SELECT code
+        FROM project_invites
+        WHERE project_id = p.id
+          AND (expires_at IS NULL OR expires_at > NOW())
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) pi ON TRUE
       WHERE p.id = $2
       LIMIT 1
       `,
@@ -172,7 +190,9 @@ export class PgProjectRepository implements ProjectRepository {
         p.name,
         p.description,
         p.git_url,
-        p.invite_code,
+        -- 활성 초대 코드. 백필이 코드 충돌로 건너뛴 행만 legacy 컬럼으로 떨어집니다
+        -- (reissueInvite가 회수와 발급을 한 트랜잭션에서 처리해 활성 코드가 비지 않습니다).
+        COALESCE(pi.code, p.invite_code) AS invite_code,
         p.last_synced_at,
         p.question_count,
         p.created_at,
@@ -186,6 +206,14 @@ export class PgProjectRepository implements ProjectRepository {
        AND pm.user_id = $1
       LEFT JOIN users u
         ON u.id = p.created_by_id
+      LEFT JOIN LATERAL (
+        SELECT code
+        FROM project_invites
+        WHERE project_id = p.id
+          AND (expires_at IS NULL OR expires_at > NOW())
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) pi ON TRUE
       ORDER BY p.created_at DESC
       `,
       [currentUserId]
@@ -232,16 +260,34 @@ export class PgProjectRepository implements ProjectRepository {
     user: { id: string; name: string; avatarUrl: string | null };
     role: ProjectRole;
   }): Promise<ProjectMember> {
-    const result = await this.pool.query<ProjectMemberRow>(
+    // 이미 멤버면 아무것도 하지 않고 기존 행을 돌려줍니다.
+    // 초대 수락을 두 번 눌러도 멤버가 한 번만 등록되게 하는 멱등성입니다
+    // (근거는 project_members(user_id, project_id) 유니크 인덱스).
+    const inserted = await this.pool.query<ProjectMemberRow>(
       `
       INSERT INTO project_members (id, user_id, project_id, role, joined_at)
       VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (user_id, project_id) DO NOTHING
       RETURNING user_id, role, joined_at
       `,
       [crypto.randomUUID(), input.user.id, input.projectId, input.role]
     );
 
-    const row = result.rows[0];
+    const row =
+      inserted.rows[0] ??
+      (
+        await this.pool.query<ProjectMemberRow>(
+          `
+          SELECT user_id, role, joined_at
+          FROM project_members
+          WHERE project_id = $1
+            AND user_id = $2
+          LIMIT 1
+          `,
+          [input.projectId, input.user.id]
+        )
+      ).rows[0];
+
     if (!row) {
       throw new Error("Failed to add project member");
     }
@@ -258,7 +304,7 @@ export class PgProjectRepository implements ProjectRepository {
   async create(input: CreateProjectInput, creator: ProjectCreator): Promise<Project> {
     const id = crypto.randomUUID();
     const projectMemberId = crypto.randomUUID();
-    const inviteCode = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
+    const inviteCode = generateInviteCode();
     const client = await this.pool.connect();
 
     try {
@@ -293,6 +339,15 @@ export class PgProjectRepository implements ProjectRepository {
         VALUES ($1, $2, $3, 'OWNER', NOW())
         `,
         [projectMemberId, creator.id, id]
+      );
+
+      // 활성 초대 코드를 함께 발급합니다. projects.invite_code는 legacy 폴백으로만 남습니다.
+      await client.query(
+        `
+        INSERT INTO project_invites (id, project_id, code, expires_at, created_by)
+        VALUES ($1, $2, $3, NULL, $4)
+        `,
+        [crypto.randomUUID(), id, inviteCode, creator.id]
       );
 
       const createdProject = await this.findByIdForUserInternal(client, id, creator.id);
@@ -338,6 +393,86 @@ export class PgProjectRepository implements ProjectRepository {
 
     const row = result.rows[0];
     return row?.role ?? null;
+  }
+
+  async findProjectByInviteCode(code: string): Promise<{ id: string; name: string } | null> {
+    const result = await this.pool.query<{ id: string; name: string }>(
+      `
+      SELECT p.id, p.name
+      FROM project_invites pi
+      JOIN projects p
+        ON p.id = pi.project_id
+      WHERE pi.code = $1
+        AND (pi.expires_at IS NULL OR pi.expires_at > NOW())
+      LIMIT 1
+      `,
+      [code]
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  async countMembers(projectId: string): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      `
+      SELECT COUNT(*)::text AS count
+      FROM project_members
+      WHERE project_id = $1
+      `,
+      [projectId]
+    );
+
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  // 기존 코드를 회수하고 새 코드를 발급합니다.
+  // 둘을 한 트랜잭션에 묶는 이유 — 사이에 틈이 생기면 활성 코드가 없는 순간이 만들어지고,
+  // 그동안 조회 쿼리가 legacy 폴백(프로젝트 id에서 유추 가능한 옛 코드)으로 떨어집니다.
+  async reissueInvite(input: { projectId: string; actorId: string }): Promise<string> {
+    const client = await this.pool.connect();
+
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+        UPDATE project_invites
+        SET expires_at = NOW()
+        WHERE project_id = $1
+          AND (expires_at IS NULL OR expires_at > NOW())
+        `,
+        [input.projectId]
+      );
+
+      const code = generateInviteCode();
+      await client.query(
+        `
+        INSERT INTO project_invites (id, project_id, code, expires_at, created_by)
+        VALUES ($1, $2, $3, NULL, $4)
+        `,
+        [crypto.randomUUID(), input.projectId, code, input.actorId]
+      );
+
+      await client.query("COMMIT");
+      return code;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async removeMember(projectId: string, userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `
+      DELETE FROM project_members
+      WHERE project_id = $1
+        AND user_id = $2
+      `,
+      [projectId, userId]
+    );
+
+    return (result.rowCount ?? 0) > 0;
   }
 
   async createGitConnection(input: {
