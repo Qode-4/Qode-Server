@@ -170,7 +170,7 @@ export class PgTeamChatRepository implements TeamChatRepository {
         const { rows } = await this.pool.query<ChatRow>(
             `SELECT id, project_id, name, created_by, created_at
         FROM chats WHERE project_id = $1 AND chat_type = 'TEAM'
-        ORDER BY created_at ASC`,
+        ORDER BY created_at DESC`,
             [projectId]
         );
         return rows.map(toRoom);
