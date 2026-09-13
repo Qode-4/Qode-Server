@@ -27,6 +27,17 @@ export const projectSyncStatusParamSchema = z.object({
   projectId: z.string().uuid(),
 });
 
+// 초대 코드는 대문자 16진수 10자리로 발급되지만, legacy 폴백(8자리)도 받아야 하므로
+// 길이를 좁히지 않고 형식만 제한합니다.
+export const inviteCodeParamSchema = z.object({
+  code: z.string().trim().regex(/^[A-Za-z0-9]{4,16}$/),
+});
+
+export const projectMemberParamSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
 export const inviteProjectMembersBodySchema = z.object({
   emails: z.array(z.string().trim().email().max(100)).min(1).max(50),
 }).superRefine((value, ctx) => {

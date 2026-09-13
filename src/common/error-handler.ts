@@ -51,6 +51,18 @@ export const registerErrorHandler = (app: FastifyInstance) => {
       });
     }
 
+    // statusCode를 들고 오는 에러(Fastify 내장 에러 등)는 그 상태를 존중합니다.
+    // 클라이언트 잘못을 500으로 돌려주면 원인이 서버 쪽으로 오인되고, 로그도 오염됩니다.
+    const carried = error as { statusCode?: unknown; code?: string; name?: string; message?: string };
+    if (typeof carried.statusCode === "number" && carried.statusCode >= 400 && carried.statusCode < 500) {
+      return reply.status(carried.statusCode).send({
+        status: carried.statusCode,
+        ok: false,
+        error: carried.code ?? carried.name ?? "BAD_REQUEST",
+        message: carried.message ?? "Bad request",
+      });
+    }
+
     request.log.error(error);
     return reply.status(500).send({
       status: 500,
