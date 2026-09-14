@@ -349,6 +349,31 @@ export const registerTeamChatRoutes = async (
         }
     );
 
+    // 명세 D-5 — 참여자 나가기. 메시지는 남는다.
+    app.delete(
+        "/api/chats/:chatId/participants/me",
+        {
+            schema: {
+                tags: ["team-chat"],
+                summary: "Leave team chat room",
+                headers: authHeaderSchema,
+                params: {
+                    type: "object",
+                    properties: { chatId: { type: "string", format: "uuid" } },
+                    required: ["chatId"],
+                },
+            },
+        },
+        async (request, reply) => {
+            const { chatId } = chatIdParamSchema.parse(request.params);
+            const token = getAccessToken(request.headers.authorization);
+            const me = await authService.getMe(token);
+
+            await service.leaveRoomOrThrow({ chatId, currentUserId: me.id });
+            return reply.send({ ok: true });
+        }
+    );
+
     app.post(
         "/api/chats/:chatId/participants",
         {
