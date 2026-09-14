@@ -1,4 +1,5 @@
 import { HttpError } from "../../common/http-error.js";
+import { resolveUniqueChatName } from "./unique-name.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import type { createChatRepository } from "./chat.repository.js";
 
@@ -160,7 +161,15 @@ export class ChatService {
       throw new HttpError(403, "Forbidden");
     }
 
-    const updated = await this.repository.updateChatName(input.chatId, input.name);
+    // BR-D3-04. 같은 범위에 같은 이름이 있으면 "(N)" 을 붙이고 최종 이름을 돌려준다.
+    const taken = await this.repository.listPersonalChatNames({
+      projectId: chat.project_id,
+      userId: input.userId,
+      excludeChatId: input.chatId,
+    });
+    const finalName = resolveUniqueChatName(input.name, taken);
+
+    const updated = await this.repository.updateChatName(input.chatId, finalName);
     if (!updated) {
       throw new HttpError(404, "Chat not found");
     }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAT_NAME_MAX_LENGTH } from "./unique-name.js";
 
 export const messageStatusSchema = z.enum(["COMPLETE", "STREAMING", "FAILED"]);   // 메시지 상태 검증
 export const chatTypeSchema = z.enum(["PERSONAL", "TEAM"]); // 채팅 타입 검증
@@ -57,8 +58,11 @@ export const updateMessageBodySchema = z
     message: "At least one field is required",
   });
 
+// 명세 BR-D3-01 은 1~100자다. 화면도 maxLength={100} 을 쓰고
+// errorMessages.ts 가 400 에 "채팅 이름은 1~100자로 입력해주세요."를 걸어둔다.
+// max(20) 이던 동안 21자 이상 이름은 화면에서 쳐놓고 저장이 400 으로 실패했다.
 export const renameChatBodySchema = z.object({
-  name: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(CHAT_NAME_MAX_LENGTH),
 });
 
 // 질문 최대 길이 2,000자 — 명세 E-1. FE ChatComposer 의 maxLength 와 같은 값이다.
