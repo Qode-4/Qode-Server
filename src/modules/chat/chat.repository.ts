@@ -66,6 +66,21 @@ export function createChatRepository(pool: Pool) {
     return r.rows.map((row) => row.name);
   }
 
+  // 개인 채팅은 created_by 로 걸러 각자 자기 것만 본다(listMyChats).
+  // 그래서 한도도 사용자별로 센다 — 프로젝트 전체로 세면 남이 만든, 보이지도 않는
+  // 채팅 때문에 막히고 사용자는 원인을 알 수 없다.
+  async function countPersonalChats(params: { projectId: string; userId: string }) {
+    const r = await pool.query<{ count: string }>(
+      `
+      SELECT count(*) AS count
+      FROM chats
+      WHERE project_id = $1 AND created_by = $2 AND chat_type = 'PERSONAL'
+      `,
+      [params.projectId, params.userId]
+    );
+    return Number(r.rows[0]?.count ?? 0);
+  }
+
   async function listChatsByProject(params: { projectId: string; limit?: number }) {
     const limit = params.limit ?? 50;
     const q = `
@@ -250,6 +265,7 @@ export function createChatRepository(pool: Pool) {
     getChatById,
     createChat,
     listPersonalChatNames,
+    countPersonalChats,
     listChatsByProject,
     deleteChatById,
     updateChatName,
