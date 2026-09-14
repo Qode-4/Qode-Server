@@ -1,4 +1,5 @@
 import { HttpError } from "../../common/http-error.js";
+import type { ProjectRepository } from "../project/project.repository.js";
 import type { createChatRepository } from "./chat.repository.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
@@ -56,7 +57,24 @@ type RenameMyChatInput = {
 };
 
 export class ChatService {
-  constructor(private readonly repository: ChatRepository) {}
+  constructor(
+    private readonly repository: ChatRepository,
+    private readonly projectRepository: ProjectRepository
+  ) {}
+
+  // 인덱싱이 끝나기 전에는 검색할 코드가 없어 LLM이 근거 없이 답한다.
+  // 질문이 저장되기 전에 끊어야 답 없는 유령 메시지가 남지 않는다 → ADR-005
+  private async assertProjectReady(projectId: string) {
+    const job = await this.projectRepository.findRunningSyncJobByProject(projectId);
+    if (!job) {
+      return;
+    }
+    // job 자체의 존재로 판단한다. progress는 0일 수 있어 참/거짓으로 쓰면 막 시작한 동기화를 놓친다.
+    throw new HttpError(409, "코드를 동기화하는 중입니다. 잠시 후 다시 시도해주세요.", {
+      code: "SYNC_IN_PROGRESS",
+      progress: job.progress,
+    });
+  }
 
   private async getChatOrThrow(chatId: string) {
     const chat = await this.repository.getChatById(chatId);
@@ -133,7 +151,8 @@ export class ChatService {
   }
 
   async sendUserMessage(input: SendUserMessageInput) {
-    await this.assertChatAccess(input.chatId, input.userId);
+    const chat = await this.assertChatAccess(input.chatId, input.userId);
+    await this.assertProjectReady(chat.project_id);
     return this.repository.insertMessage({
       chatId: input.chatId,
       userId: input.userId,

@@ -402,6 +402,7 @@ const streamQodeRagAssistant = traceable(
 );
 await registerChatRoutes(app, {
   repository: chatRepository,
+  projectRepository,
   authRepository,
   streamAssistant: streamQodeRagAssistant,
 });
