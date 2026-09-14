@@ -17,6 +17,8 @@ const build = (opts: {
   const leftUsers: string[] = [];
 
   const repository = {
+    getMessage: async () => [] as never,
+    getParticipants: async () => [] as never,
     countRooms: async () => opts.roomCount ?? 0,
     createRoom: async (params: unknown) => {
       createdRooms.push(params);
@@ -281,3 +283,40 @@ describe("팀 채팅방 개수 제한", () => {
     expect(MAX_TEAM_CHAT_ROOMS).toBe(50);
   });
 });
+
+// 명세 BR-D5-01 — 읽기 권한을 "프로젝트 멤버"에서 "방 참여자"로 옮긴다.
+describe("읽기 접근은 방 참여자 기준이다", () => {
+  const readers: Array<[string, (s: ReturnType<typeof build>["service"]) => Promise<unknown>]> = [
+    ["방 조회", (s) => s.getRoomOrThrow("c1", "u1")],
+    ["메시지 조회", (s) => s.getMessages({ chatId: "c1", currentUserId: "u1", limit: 10 })],
+    ["참여자 조회", (s) => s.getParticipants("c1", "u1")],
+  ];
+
+  for (const [label, read] of readers) {
+    it(`${label} — 방 참여자는 볼 수 있다`, async () => {
+      const { service } = build({ roomRole: "MEMBER" });
+
+      expect(await capture(() => read(service))).toBeNull();
+    });
+
+    it(`${label} — 프로젝트 멤버라도 방 참여자가 아니면 403`, async () => {
+      // 이 전환의 핵심이다. 전에는 프로젝트 멤버면 초대받지 않은 방도 다 읽혔다.
+      const { service } = build({ roomRole: null, projectRole: "MEMBER" });
+
+      expect((await capture(() => read(service)))?.statusCode).toBe(403);
+    });
+
+    it(`${label} — 프로젝트 OWNER 라도 방 참여자가 아니면 403`, async () => {
+      const { service } = build({ roomRole: null, projectRole: "OWNER" });
+
+      expect((await capture(() => read(service)))?.statusCode).toBe(403);
+    });
+
+    it(`${label} — 없는 방이면 404`, async () => {
+      const { service } = build({ room: null });
+
+      expect((await capture(() => read(service)))?.statusCode).toBe(404);
+    });
+  }
+});
+
