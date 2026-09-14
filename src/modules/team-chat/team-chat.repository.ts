@@ -70,6 +70,10 @@ export interface TeamChatRepository {
     }): Promise<TeamChatRoom>;
     getRoom(chatId: string): Promise<TeamChatRoom | null>;
     getRoomsByProject(projectId: string): Promise<TeamChatRoom[]>;
+    listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]>;
+    renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null>;
+    deleteRoom(chatId: string): Promise<boolean>;
+    getParticipantRole(chatId: string, userId: string): Promise<"OWNER" | "ADMIN" | "MEMBER" | null>;
     getMessage(params: {
         chatId: string;
         limit: number;
@@ -164,6 +168,49 @@ export class PgTeamChatRepository implements TeamChatRepository {
         );
 
         return rows[0] ? toRoom(rows[0]) : null;
+    }
+
+    // BR-D3-04 의 "같은 목록 범위" — 팀 채팅은 프로젝트의 팀 채팅 전체다.
+    async listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]> {
+        const { rows } = await this.pool.query<{ name: string }>(
+            `SELECT name FROM chats
+             WHERE project_id = $1 AND chat_type = 'TEAM'
+               AND ($2::uuid IS NULL OR id <> $2)`,
+            [projectId, excludeChatId ?? null]
+        );
+        return rows.map((row) => row.name);
+    }
+
+    async renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null> {
+        const { rows } = await this.pool.query<ChatRow>(
+            `UPDATE chats SET name = $2
+             WHERE id = $1 AND chat_type = 'TEAM'
+             RETURNING id, project_id, name, created_by, created_at`,
+            [chatId, name]
+        );
+        const row = rows[0];
+        return row ? toRoom(row) : null;
+    }
+
+    // 하드 삭제다(BR-D1-04). chat_participants·messages 는 chat_id 가
+    // ON DELETE CASCADE 라 방 행 하나만 지우면 함께 지워진다.
+    async deleteRoom(chatId: string): Promise<boolean> {
+        const { rowCount } = await this.pool.query(
+            `DELETE FROM chats WHERE id = $1 AND chat_type = 'TEAM'`,
+            [chatId]
+        );
+        return (rowCount ?? 0) > 0;
+    }
+
+    // 방 단위 권한이다. 프로젝트 멤버 역할(project_members)과 다르다 —
+    // 방을 만든 사람이 그 방의 OWNER 다.
+    async getParticipantRole(chatId: string, userId: string) {
+        const { rows } = await this.pool.query<{ member_role: "OWNER" | "ADMIN" | "MEMBER" }>(
+            `SELECT member_role FROM chat_participants
+             WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+            [chatId, userId]
+        );
+        return rows[0]?.member_role ?? null;
     }
 
     async getRoomsByProject(projectId: string): Promise<TeamChatRoom[]> {

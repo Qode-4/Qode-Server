@@ -47,6 +47,25 @@ export function createChatRepository(pool: Pool) {
     return r.rows[0];
   }
 
+  // BR-D3-04 의 "같은 목록 범위" — 개인 채팅은 본인이 만든 것들이다.
+  // 자기 자신은 빼고 돌려준다. 이름을 그대로 두는 변경에 "(2)"가 붙으면 안 된다.
+  async function listPersonalChatNames(params: {
+    projectId: string;
+    userId: string;
+    excludeChatId?: string;
+  }) {
+    const r = await pool.query<{ name: string }>(
+      `
+      SELECT name
+      FROM chats
+      WHERE project_id = $1 AND created_by = $2 AND chat_type = 'PERSONAL'
+        AND ($3::uuid IS NULL OR id <> $3)
+      `,
+      [params.projectId, params.userId, params.excludeChatId ?? null]
+    );
+    return r.rows.map((row) => row.name);
+  }
+
   async function listChatsByProject(params: { projectId: string; limit?: number }) {
     const limit = params.limit ?? 50;
     const q = `
@@ -230,6 +249,7 @@ export function createChatRepository(pool: Pool) {
     // Chat
     getChatById,
     createChat,
+    listPersonalChatNames,
     listChatsByProject,
     deleteChatById,
     updateChatName,
