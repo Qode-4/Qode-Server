@@ -147,6 +147,92 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     END $$;
   `);
 
+  // 같은 사용자가 한 프로젝트에 두 번 들어가지 못하게 합니다.
+  // 초대 링크 수락을 두 번 눌러도 멤버가 한 번만 등록되도록 하는 멱등성의 근거입니다.
+  // 제약을 걸기 전에 기존 중복을 먼저 정리합니다 — 마이그레이션은 서버 기동 시 돌기 때문에
+  // 여기서 실패하면 서버가 뜨지 않습니다.
+  // 남길 행은 OWNER 우선, 그다음 먼저 가입한 순입니다.
+  // 물리적 저장 순서(ctid)만으로 자르면 OWNER 행이 지워져 주인 없는 프로젝트가 생길 수 있습니다.
+  await pool.query(`
+    DELETE FROM project_members pm
+    USING (
+      SELECT
+        ctid,
+        ROW_NUMBER() OVER (
+          PARTITION BY user_id, project_id
+          ORDER BY (role = 'OWNER') DESC, joined_at ASC NULLS LAST, ctid
+        ) AS rn
+      FROM project_members
+    ) ranked
+    WHERE pm.ctid = ranked.ctid
+      AND ranked.rn > 1
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS project_members_user_project_unique_idx
+    ON project_members (user_id, project_id)
+  `);
+
+  // legacy 폴백 컬럼을 새 코드 길이(16진수 10자리)에 맞춰 넓힙니다.
+  // 넓히지 않으면 프로젝트 생성이 22001(string_data_right_truncation)로 실패합니다.
+  await pool.query(`
+    ALTER TABLE projects
+    ALTER COLUMN invite_code TYPE VARCHAR(16)
+  `);
+
+  // 초대 링크. projects.invite_code를 대체합니다.
+  // expires_at은 만료 기능이 아니라 회수 자리입니다 — 발급 시 항상 NULL이고,
+  // 회수할 때만 NOW()를 넣어 그 코드를 죽입니다.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_invites (
+      id UUID PRIMARY KEY,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      code VARCHAR(16) NOT NULL,
+      expires_at TIMESTAMPTZ NULL,
+      created_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS project_invites_code_unique_idx
+    ON project_invites (code)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS project_invites_project_active_idx
+    ON project_invites (project_id)
+    WHERE expires_at IS NULL
+  `);
+
+  // 기존 프로젝트에 활성 초대 코드를 하나씩 발급합니다.
+  //
+  // projects.invite_code를 그대로 옮기지 않고 새로 발급하는 이유 —
+  // 기존 값은 프로젝트 id의 앞 8자리에서 파생됐고(위 UPDATE 참고) id는 URL에 노출된다.
+  // 즉 프로젝트 주소를 본 사람은 초대 코드를 계산할 수 있었다. 아직 이 코드를 쓰는 경로가
+  // 없는 지금이 부작용 없이 갈아끼울 수 있는 유일한 시점입니다.
+  //
+  // ON CONFLICT DO NOTHING — 10자리 16진수가 충돌할 확률은 사실상 0이지만,
+  // 충돌하면 서버가 기동하지 못하므로 건너뛰게 둡니다. 코드가 없는 프로젝트는
+  // 조회 시점에 발급됩니다(ProjectRepository.getOrCreateInviteCode).
+  await pool.query(`
+    INSERT INTO project_invites (id, project_id, code, expires_at, created_by)
+    SELECT
+      gen_random_uuid(),
+      p.id,
+      UPPER(SUBSTRING(MD5(random()::text || clock_timestamp()::text || p.id::text) FROM 1 FOR 10)),
+      NULL,
+      p.created_by_id
+    FROM projects p
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM project_invites pi
+      WHERE pi.project_id = p.id
+        AND pi.expires_at IS NULL
+    )
+    ON CONFLICT DO NOTHING
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS project_sync_jobs (
       id UUID PRIMARY KEY,

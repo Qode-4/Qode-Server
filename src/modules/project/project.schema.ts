@@ -1,8 +1,9 @@
 import { z } from "zod";
 
 export const createProjectBodySchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().min(1).max(1000).nullable().optional(),
+  // 명세 A-3. 화면(Qode-Fe 생성 모달)의 maxLength 와 같은 값이다.
+  name: z.string().trim().min(2).max(50),
+  description: z.string().trim().min(1).max(200).nullable().optional(),
   git: z
     .object({
       provider: z.literal("github_oauth"),
@@ -25,6 +26,17 @@ export const projectSyncJobParamSchema = z.object({
 
 export const projectSyncStatusParamSchema = z.object({
   projectId: z.string().uuid(),
+});
+
+// 초대 코드는 대문자 16진수 10자리로 발급되지만, legacy 폴백(8자리)도 받아야 하므로
+// 길이를 좁히지 않고 형식만 제한합니다.
+export const inviteCodeParamSchema = z.object({
+  code: z.string().trim().regex(/^[A-Za-z0-9]{4,16}$/),
+});
+
+export const projectMemberParamSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
 });
 
 export const inviteProjectMembersBodySchema = z.object({

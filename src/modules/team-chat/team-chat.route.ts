@@ -6,7 +6,7 @@ import { FastifyInstance } from "fastify";
 import { AuthService } from "../auth/auth.service.js";
 import { TeamChatService } from "./team-chat.service.js";
 import { HttpError } from "../../common/http-error.js";
-import { chatIdParamSchema, projectIdParamSchema, createRoomBodySchema, getMessagesQuerySchema, addParticipantBodySchema } from "../team-chat/team-chat.schema.js";
+import { chatIdParamSchema, projectIdParamSchema, createRoomBodySchema, getMessagesQuerySchema, addParticipantBodySchema, renameRoomBodySchema, projectChatParamSchema } from "../team-chat/team-chat.schema.js";
 
 type RouteDeps = {
     repository: TeamChatRepository;
@@ -283,6 +283,97 @@ export const registerTeamChatRoutes = async (
     );
 
     // 참여자 추가
+    // 명세 D-3 — 팀 채팅방 이름 변경. 방 멤버 누구나 바꿀 수 있고 최종 이름을 돌려준다.
+    app.patch(
+        "/api/projects/:projectId/chats/:chatId",
+        {
+            schema: {
+                tags: ["team-chat"],
+                summary: "Rename team chat room",
+                headers: authHeaderSchema,
+                params: {
+                    type: "object",
+                    properties: {
+                        projectId: { type: "string", format: "uuid" },
+                        chatId: { type: "string", format: "uuid" },
+                    },
+                    required: ["projectId", "chatId"],
+                },
+                body: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                    required: ["name"],
+                },
+            },
+        },
+        async (request, reply) => {
+            const params = projectChatParamSchema.parse(request.params);
+            const body = renameRoomBodySchema.parse(request.body);
+            const token = getAccessToken(request.headers.authorization);
+            const me = await authService.getMe(token);
+
+            const data = await service.renameRoomOrThrow({
+                chatId: params.chatId,
+                name: body.name,
+                currentUserId: me.id,
+            });
+            return reply.send({ ok: true, data });
+        }
+    );
+
+    // 명세 D-1 — 팀 채팅방 삭제. 하드 삭제라 방 OWNER 로 제한한다(BR-D1-04).
+    app.delete(
+        "/api/projects/:projectId/chats/:chatId",
+        {
+            schema: {
+                tags: ["team-chat"],
+                summary: "Delete team chat room",
+                headers: authHeaderSchema,
+                params: {
+                    type: "object",
+                    properties: {
+                        projectId: { type: "string", format: "uuid" },
+                        chatId: { type: "string", format: "uuid" },
+                    },
+                    required: ["projectId", "chatId"],
+                },
+            },
+        },
+        async (request, reply) => {
+            const params = projectChatParamSchema.parse(request.params);
+            const token = getAccessToken(request.headers.authorization);
+            const me = await authService.getMe(token);
+
+            await service.deleteRoomOrThrow({ chatId: params.chatId, currentUserId: me.id });
+            return reply.send({ ok: true });
+        }
+    );
+
+    // 명세 D-5 — 참여자 나가기. 메시지는 남는다.
+    app.delete(
+        "/api/chats/:chatId/participants/me",
+        {
+            schema: {
+                tags: ["team-chat"],
+                summary: "Leave team chat room",
+                headers: authHeaderSchema,
+                params: {
+                    type: "object",
+                    properties: { chatId: { type: "string", format: "uuid" } },
+                    required: ["chatId"],
+                },
+            },
+        },
+        async (request, reply) => {
+            const { chatId } = chatIdParamSchema.parse(request.params);
+            const token = getAccessToken(request.headers.authorization);
+            const me = await authService.getMe(token);
+
+            await service.leaveRoomOrThrow({ chatId, currentUserId: me.id });
+            return reply.send({ ok: true });
+        }
+    );
+
     app.post(
         "/api/chats/:chatId/participants",
         {

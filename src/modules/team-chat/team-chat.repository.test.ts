@@ -140,7 +140,7 @@ describe("PgTeamChatRepository", () => {
             expect(rooms).toHaveLength(0);
         });
 
-        it("생성 시간 오름차순으로 정렬된다", async () => {
+        it("최신 생성순으로 정렬된다", async () => {
             const userId = await createTestUser("user@test.com");
             const projectId = await createTestProject(userId);
 
@@ -148,8 +148,72 @@ describe("PgTeamChatRepository", () => {
             await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "두번째", createdBy: userId });
 
             const rooms = await repo.getRoomsByProject(projectId);
-            expect(rooms[0]?.name).toBe("첫번째");
-            expect(rooms[1]?.name).toBe("두번째");
+            expect(rooms[0]?.name).toBe("두번째");
+            expect(rooms[1]?.name).toBe("첫번째");
+        });
+    });
+
+    // 명세 D-5 — 나가기는 행을 지우지 않고 left_at 에 시각을 남긴다.
+    describe("leaveRoom / 재참여", () => {
+        it("나가면 참여자 목록에서 빠진다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const member = await createTestUser("member@test.com");
+            const projectId = await createTestProject(owner);
+            const room = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "일반", createdBy: owner });
+            await repo.addParticipant({ chatId: room.id, userId: member, role: "MEMBER" });
+
+            const left = await repo.leaveRoom(room.id, member);
+
+            expect(left).toBe(true);
+            expect(await repo.getParticipants(room.id)).toHaveLength(1);
+        });
+
+        it("나간 사람의 메시지는 남는다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const member = await createTestUser("member@test.com");
+            const projectId = await createTestProject(owner);
+            const room = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "일반", createdBy: owner });
+            await repo.addParticipant({ chatId: room.id, userId: member, role: "MEMBER" });
+            await repo.insertMessage({ chatId: room.id, userId: member, content: "안녕하세요" });
+
+            await repo.leaveRoom(room.id, member);
+
+            const messages = await repo.getMessage({ chatId: room.id, limit: 10 });
+            expect(messages).toHaveLength(1);
+        });
+
+        it("나갔던 사람이 다시 들어올 수 있다", async () => {
+            // ON CONFLICT DO NOTHING 이면 left_at 이 남아 목록에 나타나지 않는다.
+            const owner = await createTestUser("owner@test.com");
+            const member = await createTestUser("member@test.com");
+            const projectId = await createTestProject(owner);
+            const room = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "일반", createdBy: owner });
+            await repo.addParticipant({ chatId: room.id, userId: member, role: "MEMBER" });
+            await repo.leaveRoom(room.id, member);
+
+            await repo.addParticipant({ chatId: room.id, userId: member, role: "MEMBER" });
+
+            expect(await repo.getParticipants(room.id)).toHaveLength(2);
+        });
+
+        it("나간 사람은 참여자 역할이 없다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const member = await createTestUser("member@test.com");
+            const projectId = await createTestProject(owner);
+            const room = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "일반", createdBy: owner });
+            await repo.addParticipant({ chatId: room.id, userId: member, role: "MEMBER" });
+            await repo.leaveRoom(room.id, member);
+
+            expect(await repo.getParticipantRole(room.id, member)).toBeNull();
+        });
+
+        it("참여자가 아니면 나가기가 false 다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const stranger = await createTestUser("stranger@test.com");
+            const projectId = await createTestProject(owner);
+            const room = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "일반", createdBy: owner });
+
+            expect(await repo.leaveRoom(room.id, stranger)).toBe(false);
         });
     });
 

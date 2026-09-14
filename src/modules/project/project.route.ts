@@ -8,7 +8,9 @@ import { AuthService } from "../auth/auth.service.js";
 import type { ProjectAnalysisService } from "../project-analysis/project-analysis.service.js";
 import {
   createProjectBodySchema,
+  inviteCodeParamSchema,
   inviteProjectMembersBodySchema,
+  projectMemberParamSchema,
   projectIdParamSchema,
   projectSyncJobParamSchema,
   projectSyncStatusParamSchema,
@@ -287,6 +289,176 @@ export const registerProjectRoutes = async (
       const me = await authService.getMe(token);
       const data = await service.listMembersOrThrow(params.id, me.id);
       return reply.send({ ok: true, data });
+    }
+  );
+
+  // --- 초대 링크 (A-2) ---
+  // 프로젝트 멤버십이므로 별도 모듈을 만들지 않고 여기 둡니다.
+
+  const inviteCodeParams = {
+    type: "object",
+    properties: {
+      code: { type: "string" },
+    },
+    required: ["code"],
+  } as const;
+
+  app.get(
+    "/api/invite/:code",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Get invite link info",
+        headers: authHeaderSchema,
+        params: inviteCodeParams,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  project: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string", format: "uuid" },
+                      name: { type: "string" },
+                    },
+                    required: ["id", "name"],
+                  },
+                  isAlreadyMember: { type: "boolean" },
+                  role: { type: "string", enum: ["OWNER", "MEMBER"] },
+                },
+                required: ["project", "isAlreadyMember", "role"],
+              },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = inviteCodeParamSchema.parse(request.params);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+      const data = await service.getInviteInfo(params.code, me.id);
+      return reply.send({ ok: true, data });
+    }
+  );
+
+  app.post(
+    "/api/invite/:code/join",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Join a project with an invite link",
+        headers: authHeaderSchema,
+        params: inviteCodeParams,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  projectId: { type: "string", format: "uuid" },
+                  role: { type: "string", enum: ["OWNER", "MEMBER"] },
+                  message: { type: "string" },
+                },
+                required: ["projectId", "role", "message"],
+              },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = inviteCodeParamSchema.parse(request.params);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+      const data = await service.joinByInviteCode(params.code, me.id);
+      return reply.send({ ok: true, data });
+    }
+  );
+
+  // 링크를 새로 만들고 이전 링크를 막습니다. 잘못 공유했을 때 되돌리는 유일한 경로입니다.
+  app.post(
+    "/api/projects/:id/invite/reissue",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Reissue the project invite code (revokes the previous one)",
+        headers: authHeaderSchema,
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  inviteCode: { type: "string" },
+                },
+                required: ["inviteCode"],
+              },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = projectIdParamSchema.parse(request.params);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+      const data = await service.reissueInviteOrThrow(params.id, me.id);
+      return reply.send({ ok: true, data });
+    }
+  );
+
+  // 내보내기와 나가기가 같은 라우트입니다. 대상이 본인이면 나가기입니다.
+  app.delete(
+    "/api/projects/:id/members/:userId",
+    {
+      schema: {
+        tags: ["project"],
+        summary: "Remove a project member (or leave the project)",
+        headers: authHeaderSchema,
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            userId: { type: "string", format: "uuid" },
+          },
+          required: ["id", "userId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = projectMemberParamSchema.parse(request.params);
+      const token = getAccessToken(request.headers.authorization);
+      const me = await authService.getMe(token);
+      await service.removeMemberOrThrow(params.id, params.userId, me.id);
+      return reply.send({ ok: true });
     }
   );
 

@@ -47,9 +47,13 @@ export type SearchResult = {
   search_meta: PythonSearchResult["search_meta"];
 };
 
+// 화면(Qode-Fe api/contracts/chats.ts)이 기다리는 모양이다. 줄 번호는 문자열
+// "L12-30" 이 아니라 숫자로 보낸다 — 화면이 startLine/endLine 을 직접 읽는다.
 export type SourceInfo = {
   filePath: string;
-  lineRange?: string;
+  startLine: number | null;
+  endLine: number | null;
+  snippet: string;
   relevanceScore: number;
 };
 

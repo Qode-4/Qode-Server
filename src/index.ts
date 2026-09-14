@@ -51,6 +51,29 @@ const app = Fastify({
 registerErrorHandler(app);
 await app.register(cookie);
 
+// axios는 본문이 없어도 Content-Type: application/json 을 붙입니다(FE apiClient의 기본 헤더).
+// Fastify 기본 파서는 이때 FST_ERR_CTP_EMPTY_JSON_BODY 를 던지므로, 본문 없는 POST/DELETE가
+// 전부 실패합니다 — 초대 수락·멤버 제거·링크 재발급이 여기 걸립니다.
+// 빈 본문은 본문 없음으로 취급하고, 깨진 JSON은 그대로 400으로 보냅니다.
+app.addContentTypeParser(
+  "application/json",
+  { parseAs: "string" },
+  (_request, body, done) => {
+    const raw = typeof body === "string" ? body.trim() : "";
+    if (raw.length === 0) {
+      done(null, undefined);
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(raw));
+    } catch (error) {
+      (error as { statusCode?: number }).statusCode = 400;
+      done(error as Error, undefined);
+    }
+  }
+);
+
 const CORS_ALLOWED_METHODS = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
 const CORS_DEFAULT_ALLOWED_HEADERS = "Content-Type, Authorization";
 
@@ -369,7 +392,7 @@ const streamQodeRagAssistant = traceable(
 
     yield {
       type: "sources" as const,
-      sources: formatResponse(fullContent, searchResult).sources,
+      sources: formatResponse(fullContent, trimmedSearchResult).sources,
     };
   },
   {
@@ -379,6 +402,7 @@ const streamQodeRagAssistant = traceable(
 );
 await registerChatRoutes(app, {
   repository: chatRepository,
+  projectRepository,
   authRepository,
   streamAssistant: streamQodeRagAssistant,
 });

@@ -14,6 +14,7 @@ import {
   renameChatBodySchema,
   sendUserMessageBodySchema,
 } from "./chat.schema.js";
+import type { ProjectRepository } from "../project/project.repository.js";
 import { ChatService } from "./chat.service.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
@@ -28,6 +29,7 @@ type StreamAssistantOutput = string | { type: "sources"; sources: SourceInfo[] }
 
 type RouteDeps = {
   repository: ChatRepository;
+  projectRepository: ProjectRepository;
   authRepository: AuthRepository;
   streamAssistant?: (input: StreamAssistantInput) => AsyncIterable<StreamAssistantOutput>;
 };
@@ -56,7 +58,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     throw new HttpError(503, "Chat repository is unavailable");
   }
 
-  const service = new ChatService(deps.repository);
+  const service = new ChatService(deps.repository, deps.projectRepository);
   const authService = new AuthService(deps.authRepository);
 
   const getRequestUserId = async (request: FastifyRequest) => {
@@ -401,7 +403,14 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
             : error instanceof Error
               ? error.message
               : "Unexpected streaming error";
-        sendEvent("error", { message });
+        // HttpError의 details.code를 그대로 실어 보낸다. SSE 라우트는 전역 에러 핸들러를
+        // 타지 않아(헤더가 이미 나갔다) 여기서 싣지 않으면 화면이 에러 종류를 구분할 수 없다.
+        const details = error instanceof HttpError ? error.details : undefined;
+        const code =
+          details && typeof details === "object" && "code" in details
+            ? (details as { code?: unknown }).code
+            : undefined;
+        sendEvent("error", { message, code, details });
       } finally {
         reply.raw.end();
       }

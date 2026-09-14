@@ -50,6 +50,10 @@ export type ProjectSyncErrorCode =
   | "PROJECT_SYNC_NETWORK_ERROR"
   | "PROJECT_SYNC_TIMEOUT"
   | "PROJECT_SYNC_STORAGE_ERROR"
+  // 명세 A-4 한도. 이름은 화면(Qode-Fe lib/sync-errors.ts)이 기다리는 것과 같아야 한다.
+  | "REPO_SIZE_LIMIT_EXCEEDED"
+  | "REPO_FILE_LIMIT_EXCEEDED"
+  | "REPO_EMPTY"
   | "PROJECT_SYNC_UNKNOWN_ERROR";
 
 export type ProjectSyncJob = {

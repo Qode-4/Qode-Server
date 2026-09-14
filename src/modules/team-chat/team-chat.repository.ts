@@ -69,7 +69,13 @@ export interface TeamChatRepository {
         createdBy: string;
     }): Promise<TeamChatRoom>;
     getRoom(chatId: string): Promise<TeamChatRoom | null>;
+    countRooms(projectId: string): Promise<number>;
     getRoomsByProject(projectId: string): Promise<TeamChatRoom[]>;
+    listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]>;
+    renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null>;
+    deleteRoom(chatId: string): Promise<boolean>;
+    getParticipantRole(chatId: string, userId: string): Promise<"OWNER" | "ADMIN" | "MEMBER" | null>;
+    leaveRoom(chatId: string, userId: string): Promise<boolean>;
     getMessage(params: {
         chatId: string;
         limit: number;
@@ -120,9 +126,11 @@ export class PgTeamChatRepository implements TeamChatRepository {
         params: { chatId: string; userId: string; role: "OWNER" | "MEMBER" }
     ): Promise<void> {
         await db.query(
+            // 나갔던 사람이 다시 들어오면 같은 행을 되살린다. DO NOTHING 이면
+            // left_at 이 남아 있어 참여자 목록에 나타나지 않는다.
             `INSERT INTO chat_participants (chat_id, user_id, member_role)
             VALUES ($1, $2, $3)
-            ON CONFLICT (chat_id, user_id) DO NOTHING`,
+            ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL`,
             [params.chatId, params.userId, params.role]
         );
     }
@@ -166,11 +174,75 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return rows[0] ? toRoom(rows[0]) : null;
     }
 
+    // BR-D3-04 의 "같은 목록 범위" — 팀 채팅은 프로젝트의 팀 채팅 전체다.
+    async listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]> {
+        const { rows } = await this.pool.query<{ name: string }>(
+            `SELECT name FROM chats
+             WHERE project_id = $1 AND chat_type = 'TEAM'
+               AND ($2::uuid IS NULL OR id <> $2)`,
+            [projectId, excludeChatId ?? null]
+        );
+        return rows.map((row) => row.name);
+    }
+
+    async renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null> {
+        const { rows } = await this.pool.query<ChatRow>(
+            `UPDATE chats SET name = $2
+             WHERE id = $1 AND chat_type = 'TEAM'
+             RETURNING id, project_id, name, created_by, created_at`,
+            [chatId, name]
+        );
+        const row = rows[0];
+        return row ? toRoom(row) : null;
+    }
+
+    // 하드 삭제다(BR-D1-04). chat_participants·messages 는 chat_id 가
+    // ON DELETE CASCADE 라 방 행 하나만 지우면 함께 지워진다.
+    async deleteRoom(chatId: string): Promise<boolean> {
+        const { rowCount } = await this.pool.query(
+            `DELETE FROM chats WHERE id = $1 AND chat_type = 'TEAM'`,
+            [chatId]
+        );
+        return (rowCount ?? 0) > 0;
+    }
+
+    // 방 단위 권한이다. 프로젝트 멤버 역할(project_members)과 다르다 —
+    // 방을 만든 사람이 그 방의 OWNER 다.
+    // 행을 지우지 않고 left_at 에 시각을 남긴다. 메시지는 users 를 참조하므로
+    // 행을 지워도 메시지는 남지만, 다시 들어올 때 기본키(chat_id, user_id) 충돌이
+    // 나지 않도록 같은 행을 되살리는 편이 단순하다.
+    async leaveRoom(chatId: string, userId: string): Promise<boolean> {
+        const { rowCount } = await this.pool.query(
+            `UPDATE chat_participants SET left_at = NOW()
+             WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+            [chatId, userId]
+        );
+        return (rowCount ?? 0) > 0;
+    }
+
+    async getParticipantRole(chatId: string, userId: string) {
+        const { rows } = await this.pool.query<{ member_role: "OWNER" | "ADMIN" | "MEMBER" }>(
+            `SELECT member_role FROM chat_participants
+             WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+            [chatId, userId]
+        );
+        return rows[0]?.member_role ?? null;
+    }
+
+    // 팀 채팅방은 프로젝트 멤버 누구에게나 보이는 공용 자원이라 프로젝트 단위로 센다.
+    async countRooms(projectId: string): Promise<number> {
+        const { rows } = await this.pool.query<{ count: string }>(
+            `SELECT count(*) AS count FROM chats WHERE project_id = $1 AND chat_type = 'TEAM'`,
+            [projectId]
+        );
+        return Number(rows[0]?.count ?? 0);
+    }
+
     async getRoomsByProject(projectId: string): Promise<TeamChatRoom[]> {
         const { rows } = await this.pool.query<ChatRow>(
             `SELECT id, project_id, name, created_by, created_at
         FROM chats WHERE project_id = $1 AND chat_type = 'TEAM'
-        ORDER BY created_at ASC`,
+        ORDER BY created_at DESC`,
             [projectId]
         );
         return rows.map(toRoom);
