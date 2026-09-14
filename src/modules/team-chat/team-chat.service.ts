@@ -44,19 +44,27 @@ export class TeamChatService {
         });
     }
 
-    async getRoomOrThrow(chatId: string, currentUserId: string){
+    // 명세 BR-D5-01 — 읽기 권한은 "프로젝트 멤버"가 아니라 "방 참여자"다.
+    // 프로젝트 멤버 기준이면 초대받지 않은 방의 대화까지 다 읽힌다.
+    //
+    // 방을 만든 사람은 createRoom 이 OWNER 참여자로 넣어주므로 자기 방에서 막히지 않는다.
+    // 나간 사람은 left_at 이 찍혀 getParticipantRole 이 null 을 준다 — 나가면 안 보인다.
+    private async assertRoomParticipant(chatId: string, currentUserId: string) {
         const room = await this.repository.getRoom(chatId);
-
         if (!room) {
             throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
         }
 
-        const myRole = await this.projectRepository.findMemberRole(room.projectId, currentUserId);
-        if (!myRole) {
+        const myRoomRole = await this.repository.getParticipantRole(chatId, currentUserId);
+        if (!myRoomRole) {
             throw new HttpError(403, "접근 권한이 없습니다.");
         }
 
         return room;
+    }
+
+    async getRoomOrThrow(chatId: string, currentUserId: string){
+        return this.assertRoomParticipant(chatId, currentUserId);
     }
 
     // BR-D3-02 — 팀 채팅은 방 멤버 누구나 이름을 바꿀 수 있다.
@@ -121,16 +129,8 @@ export class TeamChatService {
         limit: number;
         before?: Date;
     }) {
-        const room = await this.repository.getRoom(params.chatId);
-        if (!room) {
-            throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
-        }
+        await this.assertRoomParticipant(params.chatId, params.currentUserId);
 
-        const myRole = await this.projectRepository.findMemberRole(room.projectId, params.currentUserId);
-        if (!myRole) {
-            throw new HttpError(403, "접근 권한이 없습니다.");
-        }
-        
         return this.repository.getMessage({
             chatId: params.chatId,
             limit: params.limit,
@@ -195,15 +195,7 @@ export class TeamChatService {
     }
 
     async getParticipants(chatId: string, currentUserId: string) {
-        const room = await this.repository.getRoom(chatId);
-        if (!room) {
-            throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
-        }
-
-        const myRole = await this.projectRepository.findMemberRole(room.projectId, currentUserId);
-        if (!myRole) {
-            throw new HttpError(403, "접근 권한이 없습니다.");
-        }
+        await this.assertRoomParticipant(chatId, currentUserId);
 
         return this.repository.getParticipants(chatId);
     }
