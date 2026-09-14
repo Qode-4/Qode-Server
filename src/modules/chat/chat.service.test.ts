@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../../common/http-error.js";
-import { ChatService } from "./chat.service.js";
+import { ChatService, MAX_PERSONAL_CHATS } from "./chat.service.js";
 
 type ChatType = "PERSONAL" | "TEAM";
 
@@ -10,9 +10,11 @@ const build = (opts: {
   createdBy?: string;
   isMember?: boolean;
   runningJob?: { progress: number } | null;
+  personalChatCount?: number;
 }) => {
   const inserted: unknown[] = [];
   const askedProjectIds: string[] = [];
+  const createdChats: unknown[] = [];
 
   const repository = {
     // 반환 모양은 chat.repository.ts 의 getChatById 를 그대로 따랐다.
@@ -29,6 +31,11 @@ const build = (opts: {
       inserted.push(params);
       return { id: "m1" } as never;
     },
+    countPersonalChats: async () => opts.personalChatCount ?? 0,
+    createChat: async (params: unknown) => {
+      createdChats.push(params);
+      return { id: "c2" } as never;
+    },
   };
 
   const projectRepository = {
@@ -39,7 +46,7 @@ const build = (opts: {
   };
 
   const service = new ChatService(repository as never, projectRepository as never);
-  return { service, inserted, askedProjectIds };
+  return { service, inserted, askedProjectIds, createdChats };
 };
 
 const send = (service: ChatService, userId = "u1") =>
@@ -108,3 +115,53 @@ describe("동기화 중 질문 차단 (ADR-005)", () => {
     expect(askedProjectIds).toHaveLength(0);
   });
 });
+
+// 명세 BR-D2-03 — 한 사용자가 한 프로젝트에서 가질 수 있는 개인 채팅 수.
+describe("개인 채팅방 개수 제한", () => {
+  const create = (service: ChatService) =>
+    service.createPersonalChat({ projectId: "p1", userId: "u1", name: "새 대화" });
+
+  const capture = async (fn: () => Promise<unknown>): Promise<HttpError | null> => {
+    try {
+      await fn();
+      return null;
+    } catch (error) {
+      return error instanceof HttpError ? error : null;
+    }
+  };
+
+  it("한도 미만이면 만들어진다", async () => {
+    const { service, createdChats } = build({ personalChatCount: MAX_PERSONAL_CHATS - 1 });
+
+    await create(service);
+
+    expect(createdChats).toHaveLength(1);
+  });
+
+  it("한도에 닿으면 409", async () => {
+    const { service } = build({ personalChatCount: MAX_PERSONAL_CHATS });
+
+    expect((await capture(() => create(service)))?.statusCode).toBe(409);
+  });
+
+  it("막힐 때 채팅방이 만들어지지 않는다", async () => {
+    const { service, createdChats } = build({ personalChatCount: MAX_PERSONAL_CHATS });
+
+    await capture(() => create(service));
+
+    expect(createdChats).toHaveLength(0);
+  });
+
+  it("문구가 사용자에게 해결 방법을 알려준다", async () => {
+    // 개인 채팅은 질문을 던지면 자동으로도 생긴다(BR-D2-06). 한도에 닿으면 질문이 막히므로
+    // "관리자에게 문의" 같은 막다른 길 문구면 안 된다.
+    const { service } = build({ personalChatCount: MAX_PERSONAL_CHATS });
+
+    expect((await capture(() => create(service)))?.message).toContain("삭제");
+  });
+
+  it("한도는 명세 값 100 이다", () => {
+    expect(MAX_PERSONAL_CHATS).toBe(100);
+  });
+});
+

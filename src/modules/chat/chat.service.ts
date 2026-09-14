@@ -56,6 +56,9 @@ type RenameMyChatInput = {
   name: string;
 };
 
+// 명세 BR-D2-03. 한 사용자가 한 프로젝트에서 가질 수 있는 개인 채팅 수다.
+export const MAX_PERSONAL_CHATS = 100;
+
 export class ChatService {
   constructor(
     private readonly repository: ChatRepository,
@@ -102,7 +105,21 @@ export class ChatService {
     return chat;
   }
 
-  createPersonalChat(input: { projectId: string; userId: string; name: string }) {
+  // 명세 BR-D2-03. 문구는 "이전 채팅을 삭제해주세요"여야 한다 —
+  // 개인 채팅은 질문을 던지면 자동으로도 만들어지므로(BR-D2-06), 한도에 닿으면
+  // 질문 자체가 막힌다. 사용자가 스스로 풀 방법을 알려주지 않으면 막다른 길이 된다.
+  //
+  // ponytail: 세는 것과 넣는 것 사이에 틈이 있어 동시 생성 시 한도를 한둘 넘을 수 있다.
+  // 20명 상한·프로젝트 이름 중복과 같은 성격이고 베타 규모에서 수용한다.
+  private async assertRoomForPersonalChats(projectId: string, userId: string) {
+    const current = await this.repository.countPersonalChats({ projectId, userId });
+    if (current >= MAX_PERSONAL_CHATS) {
+      throw new HttpError(409, "채팅방 최대 개수에 도달했습니다. 이전 채팅을 삭제해주세요.");
+    }
+  }
+
+  async createPersonalChat(input: { projectId: string; userId: string; name: string }) {
+    await this.assertRoomForPersonalChats(input.projectId, input.userId);
     return this.repository.createChat({
       projectId: input.projectId,
       createdBy: input.userId,
