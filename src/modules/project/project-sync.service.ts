@@ -5,6 +5,7 @@ import { HttpError } from "../../common/http-error.js";
 import { env } from "../../config/env.js";
 import { decryptSecret } from "../../lib/secret-crypto.js";
 import type { ProjectRepository } from "./project.repository.js";
+import { MAX_INDEX_FILES, MAX_REPO_BYTES, scanRepository } from "./repo-scan.js";
 import type { ProjectSyncErrorCode, ProjectSyncJob, ProjectSyncStatusView } from "./project.types.js";
 
 const SYNC_TIMEOUT_MS = 10 * 60 * 1000;
@@ -310,6 +311,26 @@ esac
       await runGitCommand(["-C", stagingPath, "checkout", "--force", "HEAD"], SYNC_TIMEOUT_MS, {
         env: gitEnv,
       });
+
+      // 인덱싱 전에 막는다. 여기를 지나면 임베딩 비용이 나가고, 큰 레포는 그 비용이 크다.
+      // 에러 코드는 화면(Qode-Fe lib/sync-errors.ts)이 기다리는 이름과 정확히 같아야 한다 —
+      // 한 글자라도 다르면 준비된 안내 대신 일반 실패 문구가 뜬다.
+      const scan = await scanRepository(stagingPath);
+      if (scan.byteSize > MAX_REPO_BYTES) {
+        throw new SyncJobError(
+          "REPO_SIZE_LIMIT_EXCEEDED",
+          `Repository is ${scan.byteSize} bytes, limit is ${MAX_REPO_BYTES}`
+        );
+      }
+      if (scan.fileCount > MAX_INDEX_FILES) {
+        throw new SyncJobError(
+          "REPO_FILE_LIMIT_EXCEEDED",
+          `Repository has ${scan.fileCount} index targets, limit is ${MAX_INDEX_FILES}`
+        );
+      }
+      if (scan.fileCount === 0) {
+        throw new SyncJobError("REPO_EMPTY", "Repository has no indexable source files");
+      }
 
       if (this.removedProjectIds.has(projectId)) {
         throw new SyncJobError("PROJECT_SYNC_UNKNOWN_ERROR", "Project has been deleted");
