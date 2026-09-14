@@ -74,6 +74,7 @@ export interface TeamChatRepository {
     renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null>;
     deleteRoom(chatId: string): Promise<boolean>;
     getParticipantRole(chatId: string, userId: string): Promise<"OWNER" | "ADMIN" | "MEMBER" | null>;
+    leaveRoom(chatId: string, userId: string): Promise<boolean>;
     getMessage(params: {
         chatId: string;
         limit: number;
@@ -124,9 +125,11 @@ export class PgTeamChatRepository implements TeamChatRepository {
         params: { chatId: string; userId: string; role: "OWNER" | "MEMBER" }
     ): Promise<void> {
         await db.query(
+            // 나갔던 사람이 다시 들어오면 같은 행을 되살린다. DO NOTHING 이면
+            // left_at 이 남아 있어 참여자 목록에 나타나지 않는다.
             `INSERT INTO chat_participants (chat_id, user_id, member_role)
             VALUES ($1, $2, $3)
-            ON CONFLICT (chat_id, user_id) DO NOTHING`,
+            ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL`,
             [params.chatId, params.userId, params.role]
         );
     }
@@ -204,6 +207,18 @@ export class PgTeamChatRepository implements TeamChatRepository {
 
     // 방 단위 권한이다. 프로젝트 멤버 역할(project_members)과 다르다 —
     // 방을 만든 사람이 그 방의 OWNER 다.
+    // 행을 지우지 않고 left_at 에 시각을 남긴다. 메시지는 users 를 참조하므로
+    // 행을 지워도 메시지는 남지만, 다시 들어올 때 기본키(chat_id, user_id) 충돌이
+    // 나지 않도록 같은 행을 되살리는 편이 단순하다.
+    async leaveRoom(chatId: string, userId: string): Promise<boolean> {
+        const { rowCount } = await this.pool.query(
+            `UPDATE chat_participants SET left_at = NOW()
+             WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+            [chatId, userId]
+        );
+        return (rowCount ?? 0) > 0;
+    }
+
     async getParticipantRole(chatId: string, userId: string) {
         const { rows } = await this.pool.query<{ member_role: "OWNER" | "ADMIN" | "MEMBER" }>(
             `SELECT member_role FROM chat_participants

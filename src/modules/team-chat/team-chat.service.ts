@@ -157,6 +157,31 @@ export class TeamChatService {
         });
     }
 
+    // 명세 D-5 — 참여자 나가기. 메시지는 남긴다. 나간 사람의 말이 사라지면
+    // 남은 사람들의 대화 맥락이 끊긴다.
+    async leaveRoomOrThrow(params: { chatId: string; currentUserId: string }) {
+        const room = await this.repository.getRoom(params.chatId);
+        if (!room) {
+            throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
+        }
+
+        const myRoomRole = await this.repository.getParticipantRole(params.chatId, params.currentUserId);
+        if (!myRoomRole) {
+            throw new HttpError(403, "채팅방 참여자가 아닙니다.");
+        }
+
+        // 방 OWNER 는 나갈 수 없다. 나가면 그 방을 지울 사람이 없어진다(D-1 은 방 OWNER 전용).
+        // 초대 링크의 멤버 제거에서 프로젝트 OWNER 를 막은 것과 같은 규칙이다.
+        if (myRoomRole === "OWNER") {
+            throw new HttpError(403, "채팅방을 만든 사람은 나갈 수 없습니다. 채팅방을 삭제해주세요.");
+        }
+
+        const left = await this.repository.leaveRoom(params.chatId, params.currentUserId);
+        if (!left) {
+            throw new HttpError(404, "채팅방 참여자가 아닙니다.");
+        }
+    }
+
     async getParticipants(chatId: string, currentUserId: string) {
         const room = await this.repository.getRoom(chatId);
         if (!room) {

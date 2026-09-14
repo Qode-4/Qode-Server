@@ -12,6 +12,7 @@ const build = (opts: {
   const renamed: string[] = [];
   const deleted: string[] = [];
   const addedParticipants: string[] = [];
+  const leftUsers: string[] = [];
 
   const repository = {
     getRoom: async () => (opts.room === undefined ? { projectId: "p1" } : opts.room),
@@ -29,6 +30,10 @@ const build = (opts: {
       addedParticipants.push(p.userId);
       return {} as never;
     },
+    leaveRoom: async (_c: string, userId: string) => {
+      leftUsers.push(userId);
+      return true;
+    },
   };
 
   const projectRepository = {
@@ -36,7 +41,7 @@ const build = (opts: {
   };
 
   const service = new TeamChatService(repository as never, projectRepository as never);
-  return { service, renamed, deleted, addedParticipants };
+  return { service, renamed, deleted, addedParticipants, leftUsers };
 };
 
 const capture = async (fn: () => Promise<unknown>): Promise<HttpError | null> => {
@@ -179,6 +184,53 @@ describe("팀 채팅방 참여자 추가", () => {
     await capture(() => add(service));
 
     expect(addedParticipants).toHaveLength(0);
+  });
+});
+
+// 명세 D-5 — 참여자 나가기. 메시지는 남긴다.
+describe("팀 채팅방 나가기", () => {
+  const leave = (service: ReturnType<typeof build>["service"]) =>
+    service.leaveRoomOrThrow({ chatId: "c1", currentUserId: "u1" });
+
+  it("참여자는 나갈 수 있다", async () => {
+    const { service, leftUsers } = build({ roomRole: "MEMBER" });
+
+    await leave(service);
+
+    expect(leftUsers).toEqual(["u1"]);
+  });
+
+  it("방 OWNER 는 나갈 수 없다", async () => {
+    // 나가면 그 방을 지울 사람이 없어진다 — 삭제는 방 OWNER 전용이다(D-1).
+    const { service } = build({ roomRole: "OWNER" });
+
+    expect((await capture(() => leave(service)))?.statusCode).toBe(403);
+  });
+
+  it("방 OWNER 에게 해결 방법을 알려준다", async () => {
+    const { service } = build({ roomRole: "OWNER" });
+
+    expect((await capture(() => leave(service)))?.message).toContain("삭제");
+  });
+
+  it("참여자가 아니면 403", async () => {
+    const { service } = build({ roomRole: null });
+
+    expect((await capture(() => leave(service)))?.statusCode).toBe(403);
+  });
+
+  it("막힐 때 나가기가 실행되지 않는다", async () => {
+    const { service, leftUsers } = build({ roomRole: "OWNER" });
+
+    await capture(() => leave(service));
+
+    expect(leftUsers).toHaveLength(0);
+  });
+
+  it("없는 방이면 404", async () => {
+    const { service } = build({ room: null });
+
+    expect((await capture(() => leave(service)))?.statusCode).toBe(404);
   });
 });
 
