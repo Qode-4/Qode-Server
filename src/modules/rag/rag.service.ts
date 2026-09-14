@@ -167,11 +167,15 @@ export const buildRagMessages = (
   return messages;
 };
 
+// 출처 미리보기 길이. 화면은 파일 경로와 줄 번호를 먼저 보여주고 본문은 보조 정보다.
+const SNIPPET_MAX_LENGTH = 200;
+
 export const deduplicateSources = (sources: SourceInfo[]): SourceInfo[] => {
   const byKey = new Map<string, SourceInfo>();
 
   for (const source of sources) {
-    const key = `${source.filePath}:${source.lineRange ?? ""}`;
+    // 키에 줄 번호가 빠지면 같은 파일의 서로 다른 청크가 하나로 합쳐진다.
+    const key = `${source.filePath}:${source.startLine ?? ""}`;
     const existing = byKey.get(key);
 
     if (!existing || source.relevanceScore > existing.relevanceScore) {
@@ -185,9 +189,11 @@ export const deduplicateSources = (sources: SourceInfo[]): SourceInfo[] => {
 export const formatResponse = (llmAnswer: string, searchResult: SearchResult): RagResponse => {
   const sources = searchResult.chunks.map((chunk) => ({
     filePath: chunk.metadata.source,
-    lineRange: chunk.metadata.start_line
-      ? `L${chunk.metadata.start_line}-${chunk.metadata.end_line ?? chunk.metadata.start_line}`
-      : undefined,
+    // splitter 가 청크 위치를 못 찾으면 start_line 이 없다(Qode-python fix/splitter-line-numbers).
+    // undefined 가 아니라 명시적 null 로 보내 화면이 "값이 없다"를 구분하게 한다.
+    startLine: chunk.metadata.start_line ?? null,
+    endLine: chunk.metadata.end_line ?? chunk.metadata.start_line ?? null,
+    snippet: chunk.page_content.slice(0, SNIPPET_MAX_LENGTH),
     relevanceScore: chunk.score,
   }));
 

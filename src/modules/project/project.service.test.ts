@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../../common/http-error.js";
+import { createProjectBodySchema } from "./project.schema.js";
 import { MAX_TEAM_MEMBERS, ProjectService } from "./project.service.js";
 
 type Member = { userId: string; role: "OWNER" | "MEMBER" };
@@ -8,9 +9,11 @@ const build = (opts: {
   code?: string;
   members?: Member[];
   memberCount?: number;
+  takenNames?: string[];
 }) => {
   const members = opts.members ?? [];
   const added: string[] = [];
+  const created: string[] = [];
   const removed: string[] = [];
   let reissued = 0;
 
@@ -33,6 +36,12 @@ const build = (opts: {
       return "NEWCODE123";
     },
     existsById: async () => true,
+    existsProjectNameForUser: async (_u: string, name: string) =>
+      (opts.takenNames ?? []).some((t) => t.trim().toLowerCase() === name.trim().toLowerCase()),
+    create: async (input: { name: string }) => {
+      created.push(input.name);
+      return {} as never;
+    },
   };
 
   const authRepository = {
@@ -40,7 +49,7 @@ const build = (opts: {
   };
 
   const service = new ProjectService(repository as never, authRepository as never);
-  return { service, added, removed, reissued: () => reissued };
+  return { service, added, removed, created, reissued: () => reissued };
 };
 
 const status = async (fn: () => Promise<unknown>) => {
@@ -155,3 +164,73 @@ describe("링크 재발급", () => {
     expect(await status(() => service.reissueInviteOrThrow("p1", "남"))).toBe(404);
   });
 });
+
+// 명세 A-3 — 같은 이름 프로젝트가 여러 개면 목록에서 구분이 되지 않는다.
+describe("프로젝트 이름 중복", () => {
+  const creator = { id: "u1", name: "홍길동", avatarUrl: null };
+  const create = (service: ReturnType<typeof build>["service"], name: string) =>
+    service.create({ name } as never, creator);
+
+  it("쓰지 않는 이름이면 만들어진다", async () => {
+    const { service, created } = build({ takenNames: [] });
+
+    await create(service, "큐오드");
+
+    expect(created).toEqual(["큐오드"]);
+  });
+
+  it("같은 이름이 이미 있으면 409", async () => {
+    const { service } = build({ takenNames: ["큐오드"] });
+
+    expect(await status(() => create(service, "큐오드"))).toBe(409);
+  });
+
+  it("대소문자만 다르면 같은 이름으로 본다", async () => {
+    const { service } = build({ takenNames: ["Qode"] });
+
+    expect(await status(() => create(service, "qode"))).toBe(409);
+  });
+
+  it("앞뒤 공백만 다르면 같은 이름으로 본다", async () => {
+    const { service } = build({ takenNames: ["큐오드"] });
+
+    expect(await status(() => create(service, "  큐오드  "))).toBe(409);
+  });
+
+  it("막힐 때 프로젝트가 만들어지지 않는다", async () => {
+    const { service, created } = build({ takenNames: ["큐오드"] });
+
+    await status(() => create(service, "큐오드"));
+
+    expect(created).toHaveLength(0);
+  });
+});
+
+// 명세 A-3 — 화면(생성 모달)의 maxLength 와 같은 값이어야 한다.
+describe("프로젝트 이름·설명 길이", () => {
+  const parse = (name: string, description?: string) =>
+    createProjectBodySchema.safeParse(description === undefined ? { name } : { name, description });
+
+  it("이름 2~50자는 통과", () => {
+    expect(parse("ab").success).toBe(true);
+    expect(parse("가".repeat(50)).success).toBe(true);
+  });
+
+  it("이름 1자는 거부", () => {
+    expect(parse("a").success).toBe(false);
+  });
+
+  it("이름 51자는 거부", () => {
+    expect(parse("가".repeat(51)).success).toBe(false);
+  });
+
+  it("설명 200자는 통과, 201자는 거부", () => {
+    expect(parse("프로젝트", "가".repeat(200)).success).toBe(true);
+    expect(parse("프로젝트", "가".repeat(201)).success).toBe(false);
+  });
+
+  it("공백만 있는 이름은 trim 후 거부", () => {
+    expect(parse("   ").success).toBe(false);
+  });
+});
+
