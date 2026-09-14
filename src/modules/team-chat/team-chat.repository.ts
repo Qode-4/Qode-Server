@@ -69,6 +69,7 @@ export interface TeamChatRepository {
         createdBy: string;
     }): Promise<TeamChatRoom>;
     getRoom(chatId: string): Promise<TeamChatRoom | null>;
+    countRooms(projectId: string): Promise<number>;
     getRoomsByProject(projectId: string): Promise<TeamChatRoom[]>;
     getMessage(params: {
         chatId: string;
@@ -164,6 +165,15 @@ export class PgTeamChatRepository implements TeamChatRepository {
         );
 
         return rows[0] ? toRoom(rows[0]) : null;
+    }
+
+    // 팀 채팅방은 프로젝트 멤버 누구에게나 보이는 공용 자원이라 프로젝트 단위로 센다.
+    async countRooms(projectId: string): Promise<number> {
+        const { rows } = await this.pool.query<{ count: string }>(
+            `SELECT count(*) AS count FROM chats WHERE project_id = $1 AND chat_type = 'TEAM'`,
+            [projectId]
+        );
+        return Number(rows[0]?.count ?? 0);
     }
 
     async getRoomsByProject(projectId: string): Promise<TeamChatRoom[]> {

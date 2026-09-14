@@ -2,6 +2,9 @@ import { HttpError } from "../../common/http-error.js";
 import { ProjectRepository } from "../project/project.repository.js";
 import { TeamChatRepository } from "./team-chat.repository.js";
 
+// 명세 BR-D2-04. 한 프로젝트가 가질 수 있는 팀 채팅방 수다.
+export const MAX_TEAM_CHAT_ROOMS = 50;
+
 export class TeamChatService {
     constructor(
         private readonly repository: TeamChatRepository,
@@ -21,6 +24,15 @@ export class TeamChatService {
         const myRole = await this.projectRepository.findMemberRole(params.projectId, params.currentUserId);
         if (!myRole) {
             throw new HttpError(403, "프로젝트 멤버만 채팅방을 생성할 수 있습니다.");
+        }
+
+        // 명세 BR-D2-04. 팀 채팅방은 공용이라 프로젝트 단위로 센다.
+        //
+        // ponytail: 세는 것과 넣는 것 사이에 틈이 있어 동시 생성 시 한도를 한둘 넘을 수 있다.
+        // 베타 규모에서 수용한다.
+        const current = await this.repository.countRooms(params.projectId);
+        if (current >= MAX_TEAM_CHAT_ROOMS) {
+            throw new HttpError(409, "채팅방 최대 개수에 도달했습니다. 이전 채팅을 삭제해주세요.");
         }
 
         return this.repository.createRoom({
