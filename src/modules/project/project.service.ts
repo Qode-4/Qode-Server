@@ -41,10 +41,24 @@ export class ProjectService {
     return this.repository.listMembers(projectId);
   }
 
-  create(
+  // 목록에서 구분이 안 되는 같은 이름을 막는다.
+  //
+  // ponytail: 세는 것과 넣는 것 사이에 틈이 있어 동시 생성 시 같은 이름이
+  // 두 개 들어갈 수 있다. 베타 규모에서는 수용한다. 엄밀히 하려면
+  // (user_id, lower(btrim(name)))에 유니크 인덱스를 걸어야 하는데,
+  // project_members가 별도 테이블이라 단일 인덱스로는 표현되지 않는다.
+  private async assertProjectNameAvailable(userId: string, name: string) {
+    const taken = await this.repository.existsProjectNameForUser(userId, name);
+    if (taken) {
+      throw new HttpError(409, "이미 사용 중인 프로젝트 이름입니다.");
+    }
+  }
+
+  async create(
     input: CreateProjectInput,
     creator: { id: string; name: string; avatarUrl: string | null }
   ) {
+    await this.assertProjectNameAvailable(creator.id, input.name);
     return this.repository.create(input, creator);
   }
 

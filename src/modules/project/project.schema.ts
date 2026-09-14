@@ -1,8 +1,9 @@
 import { z } from "zod";
 
 export const createProjectBodySchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().min(1).max(1000).nullable().optional(),
+  // 명세 A-3. 화면(Qode-Fe 생성 모달)의 maxLength 와 같은 값이다.
+  name: z.string().trim().min(2).max(50),
+  description: z.string().trim().min(1).max(200).nullable().optional(),
   git: z
     .object({
       provider: z.literal("github_oauth"),

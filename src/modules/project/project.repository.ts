@@ -48,6 +48,7 @@ export interface ProjectRepository {
   getLatestSyncJob(projectId: string): Promise<ProjectSyncJob | null>;
   findSyncJobById(projectId: string, jobId: string): Promise<ProjectSyncJob | null>;
   findRunningSyncJobByProject(projectId: string): Promise<ProjectSyncJob | null>;
+  existsProjectNameForUser(userId: string, name: string): Promise<boolean>;
   markSyncJobRunning(jobId: string): Promise<void>;
   updateSyncJobProgress(jobId: string, progress: number): Promise<void>;
   completeSyncJob(jobId: string, syncedCommit: string): Promise<void>;
@@ -646,6 +647,25 @@ export class PgProjectRepository implements ProjectRepository {
 
     const row = result.rows[0];
     return row ? toProjectSyncJob(row) : null;
+  }
+
+  // 이름 중복은 "내가 참여 중인 프로젝트" 안에서만 본다. 전체에서 막으면
+  // 남이 어떤 이름을 쓰는지 알려주는 셈이 된다.
+  // 비교는 trim 후 대소문자 무시 — 사용자가 눈으로 구분하지 못하는 차이로
+  // 통과시키면 중복을 막는 목적을 이루지 못한다.
+  async existsProjectNameForUser(userId: string, name: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `
+      SELECT 1
+      FROM projects p
+      JOIN project_members pm ON pm.project_id = p.id
+      WHERE pm.user_id = $1
+        AND lower(btrim(p.name)) = lower(btrim($2))
+      LIMIT 1
+      `,
+      [userId, name]
+    );
+    return result.rows.length > 0;
   }
 
   async findRunningSyncJobByProject(projectId: string): Promise<ProjectSyncJob | null> {
