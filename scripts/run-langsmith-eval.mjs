@@ -143,6 +143,16 @@ const askLive = async (question) => {
   if (!chatRes.ok) throw new Error(`채팅 생성 실패 ${chatRes.status}`);
   const chatId = (await chatRes.json()).data.id;
 
+  // 개인 채팅은 프로젝트당 50개 상한(BR-D2-03)이다. 문항마다 방을 만들므로 쓰고 바로 지운다 —
+  // 안 지우면 50문항째부터 채팅 생성이 409 로 막힌다 (2026-09-16 실측).
+  try {
+    return await askInChat(chatId, question, headers);
+  } finally {
+    await fetch(`${BASE_URL}/api/chats/me/${chatId}`, { method: "DELETE", headers });
+  }
+};
+
+const askInChat = async (chatId, question, headers) => {
   const res = await fetch(`${BASE_URL}/api/chats/me/${chatId}/messages`, {
     method: "POST",
     headers,
