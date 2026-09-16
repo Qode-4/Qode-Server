@@ -29,6 +29,8 @@ import {
   formatResponse,
   RagSearchClient,
   trimContext,
+  RAG_CONTEXT_MAX_CHARS,
+  RAG_TOP_K,
 } from "./modules/rag/rag.service.js";
 import type { PromptMessage, SearchResult } from "./modules/rag/rag.types.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
@@ -371,11 +373,11 @@ const streamQodeRagAssistant = traceable(
     const searchResult = await searchRagChunks({
       query: content,
       projectId: chat.project_id,
-      topK: 5,
+      topK: RAG_TOP_K,
     });
     const trimmedSearchResult = await trimRagSearchResult({
       searchResult,
-      maxChars: 8_000,
+      maxChars: RAG_CONTEXT_MAX_CHARS,
     });
     const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
     const openAiMessages = await buildRagPromptMessages({
