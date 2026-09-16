@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildRagSystemPrompt, deduplicateSources, formatResponse, trimContext } from "./rag.service.js";
+import {
+  buildRagSystemPrompt,
+  deduplicateSources,
+  formatResponse,
+  RAG_TOP_K,
+  trimContext,
+} from "./rag.service.js";
 import type { RetrievedChunk, SearchResult } from "./rag.types.js";
 
 const chunk = (source: string, chars: number, score: number): RetrievedChunk => ({
@@ -102,3 +108,12 @@ describe("sources 계약 — 화면이 읽는 모양으로 내보낸다", () => 
   });
 });
 
+
+// 열린 과제 13-19 — top_k 를 10으로 올리면서 trimContext 예산도 함께 올렸다.
+// 예산이 8,000자에 머물면 최대 크기(1,000자) 청크 10개 중 뒤쪽 2~3개가 조용히 잘린다.
+describe("top_k 만큼의 최대 크기 청크가 기본 예산 안에 다 들어간다", () => {
+  it(`${RAG_TOP_K}개 × 1,000자가 잘리지 않는다`, () => {
+    const chunks = Array.from({ length: RAG_TOP_K }, (_, i) => chunk(`f${i}.ts`, 1_000, 1 - i / 100));
+    expect(trimContext(chunks)).toHaveLength(RAG_TOP_K);
+  });
+});

@@ -36,6 +36,12 @@ const pythonSearchResultSchema: z.ZodType<PythonSearchResult> = z.object({
   }),
 });
 
+// 열린 과제 13-19 — top_k 5 → 10. how 유형 질문은 정답 청크를 최대 8개까지 본다.
+// 청크는 최대 1,000자라 10개면 1만 자 — 8,000자 예산이면 뒤쪽 2~3개가 조용히 잘린다.
+// 두 값은 같이 움직여야 한다. Qode-python app/api/main.py 의 top_k 기본값과도 맞춘다.
+export const RAG_TOP_K = 10;
+export const RAG_CONTEXT_MAX_CHARS = 12_000;
+
 export const normalizeSearchResult = (result: PythonSearchResult): SearchResult => ({
   search_meta: result.search_meta,
   chunks: result.chunks.map((chunk) => {
@@ -59,7 +65,7 @@ export class RagSearchClient {
   async searchChunksRaw(
     query: string,
     projectId: string,
-    topK = 5
+    topK = RAG_TOP_K
   ): Promise<PythonSearchResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 30_000);
@@ -93,13 +99,13 @@ export class RagSearchClient {
     }
   }
 
-  async searchChunks(query: string, projectId: string, topK = 5): Promise<SearchResult> {
+  async searchChunks(query: string, projectId: string, topK = RAG_TOP_K): Promise<SearchResult> {
     const raw = await this.searchChunksRaw(query, projectId, topK);
     return normalizeSearchResult(raw);
   }
 }
 
-export const trimContext = (chunks: RetrievedChunk[], maxChars = 8_000): RetrievedChunk[] => {
+export const trimContext = (chunks: RetrievedChunk[], maxChars = RAG_CONTEXT_MAX_CHARS): RetrievedChunk[] => {
   const result: RetrievedChunk[] = [];
   let totalChars = 0;
 
