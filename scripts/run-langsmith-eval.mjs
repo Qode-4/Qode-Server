@@ -147,6 +147,12 @@ const askLive = async (question) => {
   // 안 지우면 50문항째부터 채팅 생성이 409 로 막힌다 (2026-09-16 실측).
   try {
     return await askInChat(chatId, question, headers);
+  } catch (error) {
+    // 검색 타임아웃(Node → Python 30초)은 일시적이다 — 2026-09-16 4회차에서 80문항 중 6문항이 이걸로 빠져
+    // 회차 전체가 비교 불가가 됐다. 한 번만 다시 묻는다. 그래도 실패하면 그대로 올려 0점으로 남긴다.
+    if (!/timed out|aborted/i.test(error.message)) throw error;
+    console.warn(`재시도: ${question.slice(0, 30)} (${error.message})`);
+    return await askInChat(chatId, question, headers);
   } finally {
     await fetch(`${BASE_URL}/api/chats/me/${chatId}`, { method: "DELETE", headers });
   }
