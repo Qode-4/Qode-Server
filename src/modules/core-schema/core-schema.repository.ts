@@ -423,6 +423,16 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS question_message_id UUID NULL REFERENCES messages(id) ON DELETE SET NULL
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_question_message_id
+    ON messages (question_message_id)
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_chat_time
     ON messages (chat_id, created_at)
   `);

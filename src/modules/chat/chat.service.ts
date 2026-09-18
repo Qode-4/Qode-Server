@@ -14,6 +14,7 @@ type SendUserMessageInput = {
 type StartAssistantMessageInput = {
   chatId: string;
   userId: string;
+  questionMessageId: string;
 };
 
 type FinalizeAssistantMessageInput = {
@@ -196,6 +197,7 @@ export class ChatService {
       role: "ASSISTANT",
       content: "",
       status: "STREAMING",
+      questionMessageId: input.questionMessageId,
     });
   }
 

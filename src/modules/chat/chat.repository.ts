@@ -165,19 +165,21 @@ export function createChatRepository(pool: Pool) {
     content?: string;
     status?: MessageStatus;
     id?: string;
+    questionMessageId?: string | null;
   }) {
     const id = params.id ?? randomUUID();
     const content = params.content ?? "";
     const status: MessageStatus =
       params.status ?? (params.role === "ASSISTANT" ? "STREAMING" : "COMPLETE");
     const userId = params.userId ?? null;
+    const question_message_id = params.questionMessageId ?? null;
 
     const q = `
-      INSERT INTO messages (id, chat_id, user_id, role, content, status)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO messages (id, chat_id, user_id, role, content, status, question_message_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, chat_id, user_id, role, content, status, created_at
     `;
-    const r = await pool.query(q, [id, params.chatId, userId, params.role, content, status]);
+    const r = await pool.query(q, [id, params.chatId, userId, params.role, content, status, question_message_id]);
     return r.rows[0];
   }
 

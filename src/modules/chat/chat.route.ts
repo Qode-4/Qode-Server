@@ -349,6 +349,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         const assistantMessage = await service.startAssistantMessage({
           chatId: params.id,
           userId,
+          questionMessageId: userMessage.id,
         });
         assistantMessageId = assistantMessage.id;
 
