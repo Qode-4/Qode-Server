@@ -141,7 +141,7 @@ describe("PgTeamChatRepository", () => {
             await createRoom({ projectId, createdBy: userId, name: "첫번째" });
             await createRoom({ projectId, createdBy: userId, name: "두번째" });
 
-            const rooms = await repo.getRoomsByProject(projectId);
+            const rooms = await repo.getRoomsByProject(projectId, userId);
             expect(rooms[0]?.name).toBe("두번째");
             expect(rooms[1]?.name).toBe("첫번째");
         });
@@ -154,9 +154,43 @@ describe("PgTeamChatRepository", () => {
             await createRoom({ projectId: projectId1, createdBy: userId });
             await createRoom({ projectId: projectId2, createdBy: userId });
 
-            const rooms = await repo.getRoomsByProject(projectId1);
+            const rooms = await repo.getRoomsByProject(projectId1, userId);
             expect(rooms).toHaveLength(1);
             expect(rooms[0]?.projectId).toBe(projectId1);
+        });
+
+        it("내가 참여자가 아닌 방은 제외된다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const outsider = await createTestUser("outsider@test.com");
+            const projectId = await createTestProject(owner);
+            await addProjectMember(projectId, outsider);
+
+            await createRoom({ projectId, createdBy: owner, name: "OWNER만 있는 방" });
+
+            const rooms = await repo.getRoomsByProject(projectId, outsider);
+            expect(rooms).toHaveLength(0);
+        });
+
+        it("내가 나간(left_at) 방은 제외된다", async () => {
+            const owner = await createTestUser("owner@test.com");
+            const member = await createTestUser("member@test.com");
+            const projectId = await createTestProject(owner);
+            await addProjectMember(projectId, member);
+
+            const room = await createRoom({
+                projectId,
+                createdBy: owner,
+                memberIds: [member],
+                name: "나간 방",
+            });
+            await repo.leaveRoomAndMaybeDeleteChat(room.id, member);
+
+            const memberRooms = await repo.getRoomsByProject(projectId, member);
+            expect(memberRooms).toHaveLength(0);
+
+            // OWNER 는 여전히 방을 본다.
+            const ownerRooms = await repo.getRoomsByProject(projectId, owner);
+            expect(ownerRooms).toHaveLength(1);
         });
     });
 

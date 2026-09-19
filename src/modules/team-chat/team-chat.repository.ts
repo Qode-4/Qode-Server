@@ -71,7 +71,8 @@ export interface TeamChatRepository {
     }): Promise<TeamChatRoom>;
     getRoom(chatId: string): Promise<TeamChatRoom | null>;
     countRooms(projectId: string): Promise<number>;
-    getRoomsByProject(projectId: string): Promise<TeamChatRoom[]>;
+    // 사용자 사이드바용. 현재 사용자가 활성 참여자(left_at IS NULL)인 방만 반환한다.
+    getRoomsByProject(projectId: string, currentUserId: string): Promise<TeamChatRoom[]>;
     nameExists(projectId: string, name: string, excludeChatId?: string): Promise<boolean>;
     renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null>;
     deleteRoom(chatId: string): Promise<boolean>;
@@ -428,12 +429,19 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return Number(rows[0]?.count ?? 0);
     }
 
-    async getRoomsByProject(projectId: string): Promise<TeamChatRoom[]> {
+    async getRoomsByProject(projectId: string, currentUserId: string): Promise<TeamChatRoom[]> {
+        // 나간 방(left_at IS NOT NULL) 이나 애초에 참여자가 아닌 방은 사이드바에서 감춘다.
+        // chat_participants 를 INNER JOIN 해 활성 참여자인 방만 걸러낸다.
         const { rows } = await this.pool.query<ChatRow>(
-            `SELECT id, project_id, name, created_by, created_at
-        FROM chats WHERE project_id = $1 AND chat_type = 'TEAM'
-        ORDER BY created_at DESC`,
-            [projectId]
+            `SELECT c.id, c.project_id, c.name, c.created_by, c.created_at
+             FROM chats c
+             INNER JOIN chat_participants cp
+               ON cp.chat_id = c.id
+              AND cp.user_id = $2
+              AND cp.left_at IS NULL
+             WHERE c.project_id = $1 AND c.chat_type = 'TEAM'
+             ORDER BY c.created_at DESC`,
+            [projectId, currentUserId]
         );
         return rows.map(toRoom);
     }

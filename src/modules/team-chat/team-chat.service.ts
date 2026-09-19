@@ -148,7 +148,7 @@ export class TeamChatService {
             throw new HttpError(403, "접근 권한이 없습니다.");
         }
 
-        return this.repository.getRoomsByProject(projectId);
+        return this.repository.getRoomsByProject(projectId, currentUserId);
     }
 
     async getMessages(params: {
