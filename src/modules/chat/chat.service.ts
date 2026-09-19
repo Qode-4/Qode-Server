@@ -2,6 +2,7 @@ import { HttpError } from "../../common/http-error.js";
 import { resolveUniqueChatName } from "./unique-name.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import type { createChatRepository } from "./chat.repository.js";
+import { SaveContextSnapshotInput } from "./chat.types.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
 
@@ -207,6 +208,10 @@ export class ChatService {
 
   failAssistantMessage(input: FailAssistantMessageInput) {
     return this.repository.failMessage(input);
+  }
+
+  saveContextSnapshot(input: SaveContextSnapshotInput) {
+    return this.repository.saveContextSnapshot(input);
   }
 
   async listMessages(input: ListMessagesInput) {

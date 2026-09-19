@@ -2,9 +2,9 @@ import { z } from "zod";
 import { traceable } from "langsmith/traceable";
 import type { ProjectAnalysisSummary } from "../modules/project-analysis/project-analysis.types.js";
 
-type OpenAiMessageRole = "system" | "user" | "assistant";
+export type OpenAiMessageRole = "system" | "user" | "assistant";
 
-type OpenAiMessage = {
+export type OpenAiMessage = {
   role: OpenAiMessageRole;
   content: string;
 };

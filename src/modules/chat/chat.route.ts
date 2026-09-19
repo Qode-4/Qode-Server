@@ -16,16 +16,11 @@ import {
 } from "./chat.schema.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import { ChatService } from "./chat.service.js";
+import { StreamAssistantInput, StreamAssistantOutput } from "./chat.types.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
 
-type StreamAssistantInput = {
-  chatId: string;
-  userId: string;
-  content: string;
-};
 
-type StreamAssistantOutput = string | { type: "sources"; sources: SourceInfo[] };
 
 type RouteDeps = {
   repository: ChatRepository;
@@ -377,6 +372,19 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
 
           if (chunk.type === "sources") {
             sendEvent("sources", { sources: chunk.sources });
+            continue;
+          }
+
+          if (chunk.type === "context_snapshot") {
+            if (assistantMessageId) {
+              await service.saveContextSnapshot({
+                messageId: assistantMessageId,
+                contextBlock: chunk.contextBlock,
+                allChunks: chunk.allChunks,
+                citedChunks: chunk.citedChunks,
+              });
+            }
+            continue;
           }
         }
 

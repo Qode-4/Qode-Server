@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { randomUUID } from "crypto";
+import { SaveContextSnapshotInput } from "./chat.types.js";
 
 export type ChatType = "PERSONAL" | "TEAM";
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
@@ -221,6 +222,23 @@ export function createChatRepository(pool: Pool) {
     }
   }
 
+  async function saveContextSnapshot(params: SaveContextSnapshotInput) {
+    const id = randomUUID();
+    const q = `
+      INSERT INTO message_context_snapshots (id, message_id, context_block, all_chunks, cited_chunks)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, message_id, created_at
+    `;
+    const r = await pool.query(q, [
+      id,
+      params.messageId,
+      params.contextBlock,
+      JSON.stringify(params.allChunks),
+      JSON.stringify(params.citedChunks),
+    ]);
+    return r.rows[0];
+  }
+
   /**
    * 과거 메시지 페이징(무한스크롤)
    * before: created_at + id 복합 커서
@@ -283,5 +301,6 @@ export function createChatRepository(pool: Pool) {
     finalizeMessage,
     failMessage,
     paginateMessages,
+    saveContextSnapshot,
   };
 }
