@@ -54,6 +54,8 @@ export type ProjectSyncErrorCode =
   | "REPO_SIZE_LIMIT_EXCEEDED"
   | "REPO_FILE_LIMIT_EXCEEDED"
   | "REPO_EMPTY"
+  // 열린 과제 13-6. 파이썬 /index 실패·타임아웃. 화면 문구는 Qode-Fe lib/sync-errors.ts
+  | "PROJECT_SYNC_INDEX_FAILED"
   | "PROJECT_SYNC_UNKNOWN_ERROR";
 
 export type ProjectSyncJob = {
