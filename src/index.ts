@@ -45,6 +45,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import { initSocketServer } from "./lib/socket/socket.server.js";
 import { PgTeamChatRepository } from "./modules/team-chat/team-chat.repository.js";
 import { registerTeamChatRoutes } from "./modules/team-chat/team-chat.route.js";
+import { TeamChatService } from "./modules/team-chat/team-chat.service.js";
 
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
@@ -288,6 +289,14 @@ const githubOauthService = new GithubOauthService(githubOauthRepository);
 const sectionRepository = new PgSectionRepository(dbPool);
 const folderRepository = new PgFolderRepository(dbPool);
 
+// 팀 채팅 리포지토리·서비스·소켓을 프로젝트 라우트보다 먼저 만든다.
+// 프로젝트 강퇴 훅(onMemberRemoved)이 teamChatService 를 호출해 팀 채팅을 정리하고,
+// 그 결과에 따라 io 로 브로드캐스트한다.
+const chatRepository = createChatRepository(dbPool);
+const teamChatRepository = new PgTeamChatRepository(dbPool);
+const teamChatService = new TeamChatService(teamChatRepository, projectRepository);
+const io = (await initSocketServer(app, chatRepository, teamChatRepository)) ?? null;
+
 await registerGithubOauthRoutes(app, {
   repository: githubOauthRepository,
   authRepository,
@@ -298,6 +307,23 @@ await registerProjectRoutes(app, {
   githubOauthService,
   syncCoordinator,
   projectAnalysisService: projectAnalysisService ?? undefined,
+  onMemberRemoved: async (projectId, removedUserId) => {
+    const results = await teamChatService.onProjectMemberRemoved(projectId, removedUserId);
+    if (!io) return;
+    for (const r of results) {
+      if (r.wasOwner && r.successorId) {
+        io.to(r.chatId).emit("team:ownership:transferred", {
+          chatId: r.chatId,
+          newOwnerId: r.successorId,
+          previousOwnerId: removedUserId,
+        });
+      }
+      io.to(r.chatId).emit("team:participants:changed", { chatId: r.chatId });
+      if (r.chatDeleted) {
+        io.to(r.chatId).emit("team:room:deleted", { chatId: r.chatId });
+      }
+    }
+  },
 });
 await registerStorageItemRoutes(app, {
   repository: storageItemRepository,
@@ -323,7 +349,6 @@ await registerFolderRoutes(app, {
   authRepository,
 });
 
-const chatRepository = createChatRepository(dbPool);
 const searchRagChunks = traceable(
   async (input: { query: string; projectId: string; topK: number }) => {
     return ragSearchClient.searchChunks(input.query, input.projectId, input.topK);
@@ -413,11 +438,12 @@ await registerChatRoutes(app, {
   streamAssistant: streamQodeRagAssistant,
 });
 
-const teamChatRepository = new PgTeamChatRepository(dbPool);
 await registerTeamChatRoutes(app, {
   repository: teamChatRepository,
   projectRepository,
   authRepository,
+  service: teamChatService,
+  io,
 });
 
 // 정상 종료 시 DB 연결을 정리합니다.
@@ -427,7 +453,6 @@ app.addHook("onClose", async () => {
 
 const start = async () => {
   try {
-    await initSocketServer(app, chatRepository, teamChatRepository);
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
   } catch (error) {
     app.log.error(error);

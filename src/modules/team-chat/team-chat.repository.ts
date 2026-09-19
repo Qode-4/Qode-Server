@@ -62,20 +62,33 @@ const toParticipant = (row: ParticipantRow): TeamChatParticipant => ({
 });
 
 export interface TeamChatRepository {
-    createRoom(params: {
+    createRoomWithParticipants(params: {
         id: string;
         projectId: string;
         name: string;
         createdBy: string;
+        memberIds: string[];
     }): Promise<TeamChatRoom>;
     getRoom(chatId: string): Promise<TeamChatRoom | null>;
     countRooms(projectId: string): Promise<number>;
     getRoomsByProject(projectId: string): Promise<TeamChatRoom[]>;
-    listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]>;
+    nameExists(projectId: string, name: string, excludeChatId?: string): Promise<boolean>;
     renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null>;
     deleteRoom(chatId: string): Promise<boolean>;
     getParticipantRole(chatId: string, userId: string): Promise<"OWNER" | "ADMIN" | "MEMBER" | null>;
-    leaveRoom(chatId: string, userId: string): Promise<boolean>;
+    leaveRoomAndMaybeDeleteChat(chatId: string, userId: string): Promise<{ deleted: boolean }>;
+    kickParticipant(chatId: string, userId: string): Promise<boolean>;
+    transferOwnership(params: {
+        chatId: string;
+        oldOwnerId: string;
+        newOwnerId: string;
+    }): Promise<void>;
+    countActiveParticipants(chatId: string): Promise<number>;
+    findOldestActiveParticipant(chatId: string, excludeUserId: string): Promise<string | null>;
+    findActiveTeamChatIdsByMember(
+        projectId: string,
+        userId: string
+    ): Promise<Array<{ chatId: string; memberRole: "OWNER" | "ADMIN" | "MEMBER" }>>;
     getMessage(params: {
         chatId: string;
         limit: number;
@@ -121,31 +134,57 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return toRoom(rows[0]);
     }
 
+    // ON CONFLICT DO UPDATE 로 재입장을 처리한다. member_role 을 항상 'MEMBER' 로 되돌려서,
+    // 이전에 OWNER 였던 사람이 다시 초대돼도 자동으로 방장이 되지 않도록 한다.
     private async addParticipantInternal(
         db: Pool | PoolClient,
         params: { chatId: string; userId: string; role: "OWNER" | "MEMBER" }
     ): Promise<void> {
         await db.query(
-            // 나갔던 사람이 다시 들어오면 같은 행을 되살린다. DO NOTHING 이면
-            // left_at 이 남아 있어 참여자 목록에 나타나지 않는다.
             `INSERT INTO chat_participants (chat_id, user_id, member_role)
             VALUES ($1, $2, $3)
-            ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL`,
+            ON CONFLICT (chat_id, user_id) DO UPDATE
+              SET left_at = NULL,
+                  member_role = 'MEMBER'`,
             [params.chatId, params.userId, params.role]
         );
     }
 
-    async createRoom(params: { id: string; projectId: string; name: string; createdBy: string; }): Promise<TeamChatRoom> {
-        const client = await this.pool.connect();
+    async createRoomWithParticipants(params: {
+        id: string;
+        projectId: string;
+        name: string;
+        createdBy: string;
+        memberIds: string[];
+    }): Promise<TeamChatRoom> {
+        // 방어적 dedupe — 서비스에서 이미 걸러도 여기서 한 번 더 잘라낸다.
+        const others = Array.from(
+            new Set(params.memberIds.filter((id) => id !== params.createdBy))
+        );
 
+        const client = await this.pool.connect();
         try {
             await client.query("BEGIN");
-            const room = await this.createRoomInternal(client, params);
+            const room = await this.createRoomInternal(client, {
+                id: params.id,
+                projectId: params.projectId,
+                name: params.name,
+                createdBy: params.createdBy,
+            });
+
             await this.addParticipantInternal(client, {
                 chatId: room.id,
                 userId: params.createdBy,
-                role: 'OWNER',
+                role: "OWNER",
             });
+            for (const userId of others) {
+                await this.addParticipantInternal(client, {
+                    chatId: room.id,
+                    userId,
+                    role: "MEMBER",
+                });
+            }
+
             await client.query("COMMIT");
             return room;
         } catch (err) {
@@ -174,15 +213,20 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return rows[0] ? toRoom(rows[0]) : null;
     }
 
-    // BR-D3-04 의 "같은 목록 범위" — 팀 채팅은 프로젝트의 팀 채팅 전체다.
-    async listRoomNames(projectId: string, excludeChatId?: string): Promise<string[]> {
-        const { rows } = await this.pool.query<{ name: string }>(
-            `SELECT name FROM chats
-             WHERE project_id = $1 AND chat_type = 'TEAM'
-               AND ($2::uuid IS NULL OR id <> $2)`,
-            [projectId, excludeChatId ?? null]
+    // 같은 프로젝트 안의 활성 팀 채팅 중에 이름이 겹치는지 본다.
+    // trim + lower 로 정규화해서 눈으로 구분되지 않는 차이는 같은 이름으로 취급한다.
+    async nameExists(projectId: string, name: string, excludeChatId?: string): Promise<boolean> {
+        const { rows } = await this.pool.query<{ exists: boolean }>(
+            `SELECT EXISTS (
+               SELECT 1 FROM chats
+               WHERE project_id = $1
+                 AND chat_type = 'TEAM'
+                 AND lower(btrim(name)) = lower(btrim($2))
+                 AND ($3::uuid IS NULL OR id <> $3)
+             ) AS exists`,
+            [projectId, name, excludeChatId ?? null]
         );
-        return rows.map((row) => row.name);
+        return rows[0]?.exists ?? false;
     }
 
     async renameRoom(chatId: string, name: string): Promise<TeamChatRoom | null> {
@@ -196,7 +240,7 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return row ? toRoom(row) : null;
     }
 
-    // 하드 삭제다(BR-D1-04). chat_participants·messages 는 chat_id 가
+    // 하드 삭제다. chat_participants·messages 는 chat_id 가
     // ON DELETE CASCADE 라 방 행 하나만 지우면 함께 지워진다.
     async deleteRoom(chatId: string): Promise<boolean> {
         const { rowCount } = await this.pool.query(
@@ -206,18 +250,164 @@ export class PgTeamChatRepository implements TeamChatRepository {
         return (rowCount ?? 0) > 0;
     }
 
-    // 방 단위 권한이다. 프로젝트 멤버 역할(project_members)과 다르다 —
-    // 방을 만든 사람이 그 방의 OWNER 다.
-    // 행을 지우지 않고 left_at 에 시각을 남긴다. 메시지는 users 를 참조하므로
-    // 행을 지워도 메시지는 남지만, 다시 들어올 때 기본키(chat_id, user_id) 충돌이
-    // 나지 않도록 같은 행을 되살리는 편이 단순하다.
-    async leaveRoom(chatId: string, userId: string): Promise<boolean> {
+    // 강퇴는 leave 와 같은 소프트 삭제(left_at)를 쓴다. 메시지 히스토리는 남긴다.
+    async kickParticipant(chatId: string, userId: string): Promise<boolean> {
         const { rowCount } = await this.pool.query(
             `UPDATE chat_participants SET left_at = NOW()
              WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
             [chatId, userId]
         );
         return (rowCount ?? 0) > 0;
+    }
+
+    // 원자성 보장 — 두 참여자 행을 FOR UPDATE 로 잠근 뒤 새 방장 승격 + 원 방장 leave 처리.
+    // 중간 단계에서 실패하면 롤백돼 방장이 두 명이 되거나 없어지는 상태가 남지 않는다.
+    async transferOwnership(params: {
+        chatId: string;
+        oldOwnerId: string;
+        newOwnerId: string;
+    }): Promise<void> {
+        const client = await this.pool.connect();
+        try {
+            await client.query("BEGIN");
+
+            const { rows } = await client.query<{
+                user_id: string;
+                member_role: "OWNER" | "ADMIN" | "MEMBER";
+                left_at: Date | null;
+            }>(
+                `SELECT user_id, member_role, left_at
+                 FROM chat_participants
+                 WHERE chat_id = $1 AND user_id = ANY($2::uuid[])
+                 FOR UPDATE`,
+                [params.chatId, [params.oldOwnerId, params.newOwnerId]]
+            );
+
+            const oldRow = rows.find((r) => r.user_id === params.oldOwnerId);
+            const newRow = rows.find((r) => r.user_id === params.newOwnerId);
+
+            if (!oldRow || oldRow.left_at !== null || oldRow.member_role !== "OWNER") {
+                throw new Error("OLD_OWNER_INVALID");
+            }
+            if (!newRow || newRow.left_at !== null || newRow.member_role === "OWNER") {
+                throw new Error("NEW_OWNER_INVALID");
+            }
+
+            await client.query(
+                `UPDATE chat_participants SET member_role = 'OWNER'
+                 WHERE chat_id = $1 AND user_id = $2`,
+                [params.chatId, params.newOwnerId]
+            );
+            await client.query(
+                `UPDATE chat_participants
+                 SET member_role = 'MEMBER', left_at = NOW()
+                 WHERE chat_id = $1 AND user_id = $2`,
+                [params.chatId, params.oldOwnerId]
+            );
+
+            await client.query("COMMIT");
+        } catch (err) {
+            await client.query("ROLLBACK");
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    // 나가기 + 마지막 참여자였다면 방 삭제까지 한 트랜잭션 안에서 처리한다.
+    // chats 를 먼저 잠가서 두 명이 동시에 나갈 때 한쪽만 삭제하도록 한다.
+    async leaveRoomAndMaybeDeleteChat(
+        chatId: string,
+        userId: string
+    ): Promise<{ deleted: boolean }> {
+        const client = await this.pool.connect();
+        try {
+            await client.query("BEGIN");
+            const lockRes = await client.query<{ id: string }>(
+                `SELECT id FROM chats
+                 WHERE id = $1 AND chat_type = 'TEAM'
+                 FOR UPDATE`,
+                [chatId]
+            );
+            if (lockRes.rows.length === 0) {
+                await client.query("COMMIT");
+                return { deleted: false };
+            }
+
+            await client.query(
+                `UPDATE chat_participants SET left_at = NOW()
+                 WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+                [chatId, userId]
+            );
+
+            const { rows } = await client.query<{ count: string }>(
+                `SELECT COUNT(*)::text AS count
+                 FROM chat_participants
+                 WHERE chat_id = $1 AND left_at IS NULL`,
+                [chatId]
+            );
+            const remaining = Number(rows[0]?.count ?? 0);
+
+            let deleted = false;
+            if (remaining === 0) {
+                await client.query(`DELETE FROM chats WHERE id = $1`, [chatId]);
+                deleted = true;
+            }
+
+            await client.query("COMMIT");
+            return { deleted };
+        } catch (err) {
+            await client.query("ROLLBACK");
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    async countActiveParticipants(chatId: string): Promise<number> {
+        const { rows } = await this.pool.query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count
+             FROM chat_participants
+             WHERE chat_id = $1 AND left_at IS NULL`,
+            [chatId]
+        );
+        return Number(rows[0]?.count ?? 0);
+    }
+
+    // 자동 방장 양도용 — 나가는 방장 자신은 뺀 가장 오래된 활성 참여자.
+    async findOldestActiveParticipant(
+        chatId: string,
+        excludeUserId: string
+    ): Promise<string | null> {
+        const { rows } = await this.pool.query<{ user_id: string }>(
+            `SELECT user_id FROM chat_participants
+             WHERE chat_id = $1 AND user_id <> $2 AND left_at IS NULL
+             ORDER BY created_at ASC
+             LIMIT 1`,
+            [chatId, excludeUserId]
+        );
+        return rows[0]?.user_id ?? null;
+    }
+
+    // 프로젝트 강퇴 훅 — 이 유저가 활성 참여자인 팀 채팅과 그 안의 방 역할을 함께 반환한다.
+    async findActiveTeamChatIdsByMember(
+        projectId: string,
+        userId: string
+    ): Promise<Array<{ chatId: string; memberRole: "OWNER" | "ADMIN" | "MEMBER" }>> {
+        const { rows } = await this.pool.query<{
+            chat_id: string;
+            member_role: "OWNER" | "ADMIN" | "MEMBER";
+        }>(
+            `SELECT c.id AS chat_id, p.member_role
+             FROM chats c
+             JOIN chat_participants p ON p.chat_id = c.id
+             WHERE c.project_id = $1
+               AND c.chat_type = 'TEAM'
+               AND p.user_id = $2
+               AND p.left_at IS NULL`,
+            [projectId, userId]
+        );
+        return rows.map((row) => ({ chatId: row.chat_id, memberRole: row.member_role }));
     }
 
     async getParticipantRole(chatId: string, userId: string) {
@@ -269,7 +459,7 @@ export class PgTeamChatRepository implements TeamChatRepository {
 
     async insertMessage(params: { chatId: string; userId: string; content: string; }): Promise<TeamChatMessage> {
         const id = crypto.randomUUID();
-        
+
         await this.pool.query(
             `INSERT INTO messages (id, chat_id, user_id, content, role)
             VALUES ($1, $2, $3, $4, 'USER')`,

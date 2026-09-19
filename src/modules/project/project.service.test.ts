@@ -10,6 +10,7 @@ const build = (opts: {
   members?: Member[];
   memberCount?: number;
   takenNames?: string[];
+  onMemberRemoved?: (projectId: string, userId: string) => Promise<void>;
 }) => {
   const members = opts.members ?? [];
   const added: string[] = [];
@@ -48,7 +49,11 @@ const build = (opts: {
     findById: async (id: string) => ({ id, name: "홍길동", avatarUrl: null }),
   };
 
-  const service = new ProjectService(repository as never, authRepository as never);
+  const service = new ProjectService(
+    repository as never,
+    authRepository as never,
+    opts.onMemberRemoved
+  );
   return { service, added, removed, created, reissued: () => reissued };
 };
 
@@ -126,6 +131,43 @@ describe("멤버 제거·나가기", () => {
     const { service, removed } = build({ members: [owner, m1] });
     await service.removeMemberOrThrow("p1", "m1", "owner");
     expect(removed).toEqual(["m1"]);
+  });
+
+  it("강퇴 성공 후 onMemberRemoved 훅이 호출된다", async () => {
+    const calls: Array<{ projectId: string; userId: string }> = [];
+    const { service } = build({
+      members: [owner, m1],
+      onMemberRemoved: async (projectId, userId) => {
+        calls.push({ projectId, userId });
+      },
+    });
+    await service.removeMemberOrThrow("p1", "m1", "owner");
+    expect(calls).toEqual([{ projectId: "p1", userId: "m1" }]);
+  });
+
+  it("훅이 실패해도 프로젝트 강퇴는 성공한다", async () => {
+    const { service, removed } = build({
+      members: [owner, m1],
+      onMemberRemoved: async () => {
+        throw new Error("team chat cleanup failed");
+      },
+    });
+    // 예외가 밖으로 새어나가지 않는다
+    await expect(service.removeMemberOrThrow("p1", "m1", "owner")).resolves.toBeUndefined();
+    expect(removed).toEqual(["m1"]);
+  });
+
+  it("강퇴가 실패하면 훅은 호출되지 않는다", async () => {
+    let called = false;
+    const { service } = build({
+      members: [owner, m1],
+      onMemberRemoved: async () => {
+        called = true;
+      },
+    });
+    // OWNER 자기 자신 강퇴 시도 → 403 (repository.removeMember 이전에 던진다)
+    await status(() => service.removeMemberOrThrow("p1", "owner", "owner"));
+    expect(called).toBe(false);
   });
 
   it("일반 멤버는 남을 내보낼 수 없다 (403)", async () => {

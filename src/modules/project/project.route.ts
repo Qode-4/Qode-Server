@@ -18,7 +18,7 @@ import {
 import type { ProjectRepository } from "./project.repository.js";
 import type { GithubOauthService } from "../github-oauth/github-oauth.service.js";
 import { ProjectSyncCoordinator, ProjectSyncService } from "./project-sync.service.js";
-import { ProjectService } from "./project.service.js";
+import { ProjectService, type ProjectMemberRemovedHook } from "./project.service.js";
 
 type RouteDeps = {
   repository: ProjectRepository;
@@ -26,6 +26,7 @@ type RouteDeps = {
   syncCoordinator: ProjectSyncCoordinator;
   githubOauthService?: GithubOauthService;
   projectAnalysisService?: ProjectAnalysisService;
+  onMemberRemoved?: ProjectMemberRemovedHook;
 };
 
 export const registerProjectRoutes = async (
@@ -35,7 +36,7 @@ export const registerProjectRoutes = async (
   const repository = deps.repository;
   const authRepository = deps.authRepository;
   const authService = new AuthService(authRepository);
-  const service = new ProjectService(repository, authRepository);
+  const service = new ProjectService(repository, authRepository, deps.onMemberRemoved);
   const syncCoordinator = deps.syncCoordinator;
   const syncService = new ProjectSyncService(repository, syncCoordinator);
   const reposRoot = resolve(process.cwd(), env.SYNC_REPO_BASE_DIR);
