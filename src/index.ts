@@ -173,7 +173,11 @@ const syncCoordinator = new ProjectSyncCoordinator(projectRepository, {
       }
     : projectAnalysisService
       ? async ({ projectId, syncedCommit }) => {
-          await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+          try {
+            await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+          } catch {
+            // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
+          }
         }
       : undefined,
 });

@@ -205,19 +205,21 @@ export class ProjectSyncCoordinator {
         if (this.removedProjectIds.has(job.projectId)) {
           return;
         }
-        await this.repository.completeSyncJob(job.id, syncedCommit);
+        // 열린 과제 13-6. 인덱싱(onJobCompleted)이 끝나기 전에 done 을 찍으면
+        // 그 사이 질문이 빈 인덱스에 닿고, 인덱싱 실패도 성공으로 남는다
         try {
-          if (this.removedProjectIds.has(job.projectId)) {
-            return;
-          }
           await this.options.onJobCompleted?.({
             projectId: job.projectId,
             syncJobId: job.id,
             syncedCommit,
           });
-        } catch {
-          // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
+        } catch (error) {
+          throw new SyncJobError("PROJECT_SYNC_INDEX_FAILED", formatErrorMessage(error));
         }
+        if (this.removedProjectIds.has(job.projectId)) {
+          return;
+        }
+        await this.repository.completeSyncJob(job.id, syncedCommit);
         return;
       } catch (error) {
         const mapped = toSyncJobError(error);
