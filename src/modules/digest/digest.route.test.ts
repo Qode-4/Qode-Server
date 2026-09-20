@@ -226,4 +226,52 @@ describe("digest routes", () => {
       expect(res.statusCode).toBe(403);
     });
   });
+
+  describe("GET source", () => {
+    it("팀채팅 참여자면 snapshot 을 돌려준다", async () => {
+      const questionId = "00000000-0000-4000-8000-000000000040";
+      const repo: Partial<DigestRepository> = {
+        getShareByDigestMessageIdIfMember: vi.fn().mockResolvedValue({
+          note: "메모",
+          pairs: [
+            {
+              questionMessageId: questionId,
+              question: "Q",
+              answerMessageId: answer1,
+              answer: "A",
+              sources: [],
+            },
+          ],
+          sharedAt: "2026-09-20T00:00:00.000Z",
+        }),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/digests/${digestMessageId}/source`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.pairs).toHaveLength(1);
+    });
+
+    it("참여자가 아니거나 존재하지 않으면 404", async () => {
+      const repo: Partial<DigestRepository> = {
+        getShareByDigestMessageIdIfMember: vi.fn().mockResolvedValue(null),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/digests/${digestMessageId}/source`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
 });

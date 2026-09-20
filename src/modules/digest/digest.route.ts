@@ -8,6 +8,8 @@ import type { DigestRepository } from "./digest.repository.js";
 import { DigestService, defaultTitle } from "./digest.service.js";
 import {
   chatIdParamSchema,
+  digestMessageIdParamSchema,
+  digestSourceJsonSchema,
   messageItemJsonSchema,
   previewDigestBodySchema,
   recentShareItemJsonSchema,
@@ -215,6 +217,38 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
         sourceChatId: params.id,
         userId,
         messageIds: query.message_ids,
+      });
+      return reply.send({ ok: true, data });
+    }
+  );
+
+  // 4) 원본 대화 열기 — 팀채팅 카드에서 공유된 pair 스냅샷을 조회한다.
+  app.get(
+    "/api/digests/:digestMessageId/source",
+    {
+      schema: {
+        tags: ["digest"],
+        summary: "Get the original Q&A pair snapshot backing a shared digest card",
+        params: {
+          type: "object",
+          properties: { digestMessageId: { type: "string", format: "uuid" } },
+          required: ["digestMessageId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { ok: { type: "boolean" }, data: digestSourceJsonSchema },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = digestMessageIdParamSchema.parse(request.params);
+      const userId = await getRequestUserId(request);
+      const data = await service.getShareSource({
+        digestMessageId: params.digestMessageId,
+        userId,
       });
       return reply.send({ ok: true, data });
     }

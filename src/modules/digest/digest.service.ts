@@ -9,6 +9,7 @@ import {
 } from "./digest.prompt.js";
 import type {
   DigestSnapshot,
+  DigestSourceResponse,
   DigestStreamOutput,
   QaSet,
   RecentShareItem,
@@ -191,6 +192,20 @@ export class DigestService {
       messageIds: params.messageIds,
       windowDays: RECENT_SHARE_WINDOW_DAYS,
     });
+  };
+
+  /**
+   * 원본 대화 열기.
+   * 팀채팅 참여자 여부는 리포지토리 JOIN 에서 검증한다.
+   * 참여자가 아니거나 카드가 없으면 동일하게 404 로 답해 존재 여부를 흘리지 않는다.
+   */
+  getShareSource = async (params: {
+    digestMessageId: string;
+    userId: string;
+  }): Promise<DigestSourceResponse> => {
+    const source = await this.repository.getShareByDigestMessageIdIfMember(params);
+    if (!source) throw new HttpError(404, "공유된 원본을 찾을 수 없습니다.");
+    return source;
   };
 }
 

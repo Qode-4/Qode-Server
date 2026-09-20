@@ -5,6 +5,7 @@ export const MAX_MESSAGES_PER_DIGEST = 20;
 export const RECENT_SHARE_WINDOW_DAYS = 30;
 
 export const chatIdParamSchema = z.object({ id: z.string().uuid() });
+export const digestMessageIdParamSchema = z.object({ digestMessageId: z.string().uuid() });
 
 /** 쿼리스트링은 문자열로 오므로 CSV 로 받아 UUID 배열로 파싱한다. */
 export const recentShareQuerySchema = z.object({
@@ -90,4 +91,26 @@ export const recentShareItemJsonSchema = {
     sharedAt: { type: "string", format: "date-time" },
   },
   required: ["digestMessageId", "targetChatId", "sharedAt"],
+} as const;
+
+export const digestSourcePairJsonSchema = {
+  type: "object",
+  properties: {
+    questionMessageId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
+    question: { type: "string" },
+    answerMessageId: { type: "string", format: "uuid" },
+    answer: { type: "string" },
+    sources: { type: "array" },
+  },
+  required: ["questionMessageId", "question", "answerMessageId", "answer", "sources"],
+} as const;
+
+export const digestSourceJsonSchema = {
+  type: "object",
+  properties: {
+    note: { anyOf: [{ type: "string" }, { type: "null" }] },
+    pairs: { type: "array", items: digestSourcePairJsonSchema },
+    sharedAt: { type: "string", format: "date-time" },
+  },
+  required: ["note", "pairs", "sharedAt"],
 } as const;

@@ -1,6 +1,11 @@
 import type { Pool } from "pg";
 import type { RetrievedChunk, SourceInfo } from "../rag/rag.types.js";
-import type { DigestSnapshot, QaSet, RecentShareItem } from "./digest.types.js";
+import type {
+  DigestSnapshot,
+  DigestSourceResponse,
+  QaSet,
+  RecentShareItem,
+} from "./digest.types.js";
 
 type QaJoinRow = {
   answer_message_id: string;
@@ -201,6 +206,36 @@ export const createDigestRepository = (db: Pool) => ({
       targetChatId: row.target_chat_id,
       sharedAt: row.created_at,
     }));
+  },
+
+  /**
+   * 팀채팅 카드에서 "원본 대화 열기"용. 요청자가 대상 팀채팅의 활성 참여자여야만 반환한다.
+   * 스냅샷을 쓰므로 원본 개인채팅이 지워져도 답이 유지된다.
+   */
+  getShareByDigestMessageIdIfMember: async (params: {
+    digestMessageId: string;
+    userId: string;
+  }): Promise<DigestSourceResponse | null> => {
+    const { rows } = await db.query<{ snapshot: DigestSnapshot; created_at: string }>(
+      `
+      SELECT s.snapshot, s.created_at
+      FROM digest_shares s
+      JOIN chat_participants cp
+        ON cp.chat_id = s.target_chat_id
+       AND cp.user_id = $2
+       AND cp.left_at IS NULL
+      WHERE s.digest_message_id = $1
+      LIMIT 1
+      `,
+      [params.digestMessageId, params.userId]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      note: row.snapshot.note ?? null,
+      pairs: row.snapshot.pairs ?? [],
+      sharedAt: row.created_at,
+    };
   },
 });
 

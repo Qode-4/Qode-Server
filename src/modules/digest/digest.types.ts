@@ -38,3 +38,9 @@ export type RecentShareItem = {
   targetChatId: string;
   sharedAt: string;
 };
+
+export type DigestSourceResponse = {
+  note: string | null;
+  pairs: DigestSnapshotPair[];
+  sharedAt: string;
+};
