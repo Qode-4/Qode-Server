@@ -310,17 +310,18 @@ await registerProjectRoutes(app, {
   onMemberRemoved: async (projectId, removedUserId) => {
     const results = await teamChatService.onProjectMemberRemoved(projectId, removedUserId);
     if (!io) return;
+    const projectRoom = `project:${projectId}`;
     for (const r of results) {
       if (r.wasOwner && r.successorId) {
-        io.to(r.chatId).emit("team:ownership:transferred", {
+        io.to(projectRoom).emit("team:ownership:transferred", {
           chatId: r.chatId,
           newOwnerId: r.successorId,
           previousOwnerId: removedUserId,
         });
       }
-      io.to(r.chatId).emit("team:participants:changed", { chatId: r.chatId });
+      io.to(projectRoom).emit("team:participants:changed", { chatId: r.chatId });
       if (r.chatDeleted) {
-        io.to(r.chatId).emit("team:room:deleted", { chatId: r.chatId });
+        io.to(projectRoom).emit("team:room:deleted", { chatId: r.chatId });
       }
     }
   },

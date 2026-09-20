@@ -36,9 +36,19 @@ export const registerTeamChatRoutes = async (
     const io = deps.io ?? null;
 
     // 소켓이 준비 안 됐으면 조용히 건너뛴다. Kafka 미준비 시나리오와 같은 graceful 처리다.
-    const emit = (chatId: string, event: string, payload: unknown) => {
+    // 프로젝트 룸에만 브로드캐스트한다 — 채팅 방에 join 하지 않은 참여자·초대 대기자도
+    // 사이드바 업데이트를 실시간으로 받아야 하므로 chat 룸 스코프로는 부족하다.
+    // 메시지 이벤트(team:message:*) 는 socket.server.ts 에서 chat 룸으로 별도 emit 한다.
+    const emitToProject = (projectId: string, event: string, payload: unknown) => {
         if (!io) return;
-        io.to(chatId).emit(event, payload);
+        io.to(`project:${projectId}`).emit(event, payload);
+    };
+
+    // 방 자체가 이미 삭제된 뒤에도 projectId 를 알아야 브로드캐스트할 수 있으므로,
+    // leave/delete/kick 은 mutation 전에 미리 projectId 를 잡아둔다.
+    const resolveProjectId = async (chatId: string): Promise<string | null> => {
+        const room = await deps.repository.getRoom(chatId);
+        return room?.projectId ?? null;
     };
 
     const authHeaderSchema = {
@@ -165,6 +175,13 @@ export const registerTeamChatRoutes = async (
                 name,
                 memberIds,
                 currentUserId: me.id,
+            });
+            emitToProject(projectId, "team:room:created", {
+                chatId: data.id,
+                projectId,
+                name: data.name,
+                createdBy: data.createdBy,
+                createdAt: data.createdAt,
             });
             return reply.status(201).send({ ok: true, data });
         }
@@ -372,7 +389,10 @@ export const registerTeamChatRoutes = async (
                 name: body.name,
                 currentUserId: me.id,
             });
-            emit(params.chatId, "team:room:renamed", { chatId: params.chatId, name: data.name });
+            emitToProject(params.projectId, "team:room:renamed", {
+                chatId: params.chatId,
+                name: data.name,
+            });
             return reply.send({ ok: true, data });
         }
     );
@@ -401,7 +421,7 @@ export const registerTeamChatRoutes = async (
             const me = await authService.getMe(token);
 
             await service.deleteRoomOrThrow({ chatId: params.chatId, currentUserId: me.id });
-            emit(params.chatId, "team:room:deleted", { chatId: params.chatId });
+            emitToProject(params.projectId, "team:room:deleted", { chatId: params.chatId });
             return reply.send({ ok: true });
         }
     );
@@ -441,10 +461,13 @@ export const registerTeamChatRoutes = async (
             const token = getAccessToken(request.headers.authorization);
             const me = await authService.getMe(token);
 
+            const projectId = await resolveProjectId(chatId);
             const { deleted } = await service.leaveRoomOrThrow({ chatId, currentUserId: me.id });
-            emit(chatId, "team:participants:changed", { chatId });
-            if (deleted) {
-                emit(chatId, "team:room:deleted", { chatId });
+            if (projectId) {
+                emitToProject(projectId, "team:participants:changed", { chatId });
+                if (deleted) {
+                    emitToProject(projectId, "team:room:deleted", { chatId });
+                }
             }
             return reply.send({ ok: true, data: { chatDeleted: deleted } });
         }
@@ -483,7 +506,10 @@ export const registerTeamChatRoutes = async (
             const token = getAccessToken(request.headers.authorization);
             const me = await authService.getMe(token);
             await service.addParticipant({ chatId, userId, currentUserId: me.id });
-            emit(chatId, "team:participants:changed", { chatId });
+            const projectId = await resolveProjectId(chatId);
+            if (projectId) {
+                emitToProject(projectId, "team:participants:changed", { chatId });
+            }
             return reply.status(204).send();
         }
     );
@@ -515,14 +541,17 @@ export const registerTeamChatRoutes = async (
             const { chatId, userId } = chatUserParamSchema.parse(request.params);
             const token = getAccessToken(request.headers.authorization);
             const me = await authService.getMe(token);
+            const projectId = await resolveProjectId(chatId);
             const { chatDeleted } = await service.kickParticipant({
                 chatId,
                 targetUserId: userId,
                 currentUserId: me.id,
             });
-            emit(chatId, "team:participants:changed", { chatId });
-            if (chatDeleted) {
-                emit(chatId, "team:room:deleted", { chatId });
+            if (projectId) {
+                emitToProject(projectId, "team:participants:changed", { chatId });
+                if (chatDeleted) {
+                    emitToProject(projectId, "team:room:deleted", { chatId });
+                }
             }
             return reply.status(204).send();
         }
@@ -562,17 +591,20 @@ export const registerTeamChatRoutes = async (
             const { newOwnerId } = transferOwnershipBodySchema.parse(request.body);
             const token = getAccessToken(request.headers.authorization);
             const me = await authService.getMe(token);
+            const projectId = await resolveProjectId(chatId);
             const { previousOwnerId } = await service.transferOwnership({
                 chatId,
                 newOwnerId,
                 currentUserId: me.id,
             });
-            emit(chatId, "team:ownership:transferred", {
-                chatId,
-                newOwnerId,
-                previousOwnerId,
-            });
-            emit(chatId, "team:participants:changed", { chatId });
+            if (projectId) {
+                emitToProject(projectId, "team:ownership:transferred", {
+                    chatId,
+                    newOwnerId,
+                    previousOwnerId,
+                });
+                emitToProject(projectId, "team:participants:changed", { chatId });
+            }
             return reply.status(204).send();
         }
     );

@@ -8,6 +8,19 @@ import { TeamChatService } from "./team-chat.service.js";
 const chatId = "00000000-0000-4000-8000-000000000001";
 const meId = "00000000-0000-4000-8000-000000000002";
 const otherId = "00000000-0000-4000-8000-000000000003";
+const projectId = "00000000-0000-4000-8000-000000000004";
+
+// route 는 브로드캐스트 대상 프로젝트를 알기 위해 resolveProjectId → repository.getRoom
+// 을 호출한다. 테스트 스텁은 최소한 이 하나만 응답하면 된다.
+const repositoryStub = {
+    getRoom: async () => ({
+        id: chatId,
+        projectId,
+        name: "테스트 방",
+        createdBy: meId,
+        createdAt: new Date(),
+    }),
+} as never;
 
 const authRepository = {
     findById: async (id: string) => ({
@@ -31,7 +44,7 @@ const buildApp = (service: TeamChatService, ioEmit?: (event: string, payload: un
           } as unknown as import("socket.io").Server)
         : null;
     return { app, register: () => registerTeamChatRoutes(app, {
-        repository: {} as never,
+        repository: repositoryStub,
         projectRepository: {} as never,
         authRepository,
         service,
