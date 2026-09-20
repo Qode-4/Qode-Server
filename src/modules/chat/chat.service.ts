@@ -2,6 +2,7 @@ import { HttpError } from "../../common/http-error.js";
 import { resolveUniqueChatName } from "./unique-name.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import type { createChatRepository } from "./chat.repository.js";
+import type { SourceInfo } from "../rag/rag.types.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
 
@@ -19,6 +20,7 @@ type StartAssistantMessageInput = {
 type FinalizeAssistantMessageInput = {
   messageId: string;
   content: string;
+  sources?: SourceInfo[];
 };
 
 type FailAssistantMessageInput = {
