@@ -18,8 +18,11 @@ type MessageRow = {
     id: string;
     chat_id: string;
     user_id: string;
+    role: "USER" | "ASSISTANT" | "SYSTEM";
     content: string;
+    sources: unknown[] | null;
     created_at: Date;
+    deleted_at: Date | null;
     user_name: string;
     avatar_url: string | null;
 }
@@ -46,8 +49,11 @@ const toMessage = (row: MessageRow): TeamChatMessage => ({
     id: row.id,
     chatId: row.chat_id,
     userId: row.user_id,
+    role: row.role,
     content: row.content,
+    sources: row.sources ?? [],
     createdAt: row.created_at,
+    deletedAt: row.deleted_at,
     userName: row.user_name,
     avatarUrl: row.avatar_url,
 });
@@ -451,8 +457,12 @@ export class PgTeamChatRepository implements TeamChatRepository {
         limit: number;
         before?: Date;
     }): Promise<TeamChatMessage[]> {
+        // 삭제(digest 카드 회수) 된 행도 그대로 반환한다. 필터하면 리스트가 축소돼 UI 스크롤이 튀고,
+        // 프론트가 "삭제된 공유입니다" placeholder 를 못 그린다. deleted_at 값으로 판별을 넘긴다.
+        // digest 공유 카드는 user_id=공유자·role=ASSISTANT 로 저장되므로 users JOIN 이 그대로 성립한다.
         const { rows } = await this.pool.query<MessageRow>(
-            `SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+            `SELECT m.id, m.chat_id, m.user_id, m.role, m.content, m.sources,
+                    m.created_at, m.deleted_at,
                     u.name AS user_name, u.avatar_url
             FROM messages m
             JOIN users u ON u.id = m.user_id
@@ -475,7 +485,8 @@ export class PgTeamChatRepository implements TeamChatRepository {
         );
 
         const { rows } = await this.pool.query<MessageRow>(
-            `SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+            `SELECT m.id, m.chat_id, m.user_id, m.role, m.content, m.sources,
+                    m.created_at, m.deleted_at,
                     u.name AS user_name, u.avatar_url
             FROM messages m
             JOIN users u ON u.id = m.user_id

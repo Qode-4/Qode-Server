@@ -74,15 +74,20 @@ export const registerTeamChatRoutes = async (
     const messageSchema = {
         type: "object",
         properties: {
-            id: { type: "string", fromat: "uuid" },
+            id: { type: "string", format: "uuid" },
             chatId: { type: "string", format: "uuid" },
             userId: { type: "string", format: "uuid" },
             userName: { type: "string" },
-            avatarUrl: { anyOf: [{type: "string"}, { type: "null" }] },
+            avatarUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
+            role: { type: "string", enum: ["USER", "ASSISTANT", "SYSTEM"] },
             content: { type: "string" },
+            // digest 공유 카드의 참조 코드. 일반 USER 메시지는 항상 [].
+            sources: { type: "array" },
             createdAt: { type: "string", format: "date-time" },
+            // digest 카드 회수(B3) 시 세팅. 프론트가 placeholder 렌더에 쓴다.
+            deletedAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
         },
-        required: ["id", "chatId", "userId", "userName", "avatarUrl", "content", "createdAt"],
+        required: ["id", "chatId", "userId", "userName", "avatarUrl", "role", "content", "sources", "createdAt"],
     } as const;
 
     const participantSchema = {
