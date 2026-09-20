@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { randomUUID } from "crypto";
 import type { SourceInfo } from "../rag/rag.types.js";
+import { SaveContextSnapshotInput } from "./chat.types.js";
 
 export type ChatType = "PERSONAL" | "TEAM";
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
@@ -166,19 +167,21 @@ export function createChatRepository(pool: Pool) {
     content?: string;
     status?: MessageStatus;
     id?: string;
+    questionMessageId?: string | null;
   }) {
     const id = params.id ?? randomUUID();
     const content = params.content ?? "";
     const status: MessageStatus =
       params.status ?? (params.role === "ASSISTANT" ? "STREAMING" : "COMPLETE");
     const userId = params.userId ?? null;
+    const question_message_id = params.questionMessageId ?? null;
 
     const q = `
-      INSERT INTO messages (id, chat_id, user_id, role, content, status)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO messages (id, chat_id, user_id, role, content, status, question_message_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, chat_id, user_id, role, content, status, created_at
     `;
-    const r = await pool.query(q, [id, params.chatId, userId, params.role, content, status]);
+    const r = await pool.query(q, [id, params.chatId, userId, params.role, content, status, question_message_id]);
     return r.rows[0];
   }
 
@@ -218,6 +221,23 @@ export function createChatRepository(pool: Pool) {
     if ((r.rowCount ?? 0) === 0) {
       throw new Error("Message not found");
     }
+  }
+
+  async function saveContextSnapshot(params: SaveContextSnapshotInput) {
+    const id = randomUUID();
+    const q = `
+      INSERT INTO message_context_snapshots (id, message_id, context_block, all_chunks, cited_chunks)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, message_id, created_at
+    `;
+    const r = await pool.query(q, [
+      id,
+      params.messageId,
+      params.contextBlock,
+      JSON.stringify(params.allChunks),
+      JSON.stringify(params.citedChunks),
+    ]);
+    return r.rows[0];
   }
 
   /**
@@ -282,5 +302,6 @@ export function createChatRepository(pool: Pool) {
     finalizeMessage,
     failMessage,
     paginateMessages,
+    saveContextSnapshot,
   };
 }

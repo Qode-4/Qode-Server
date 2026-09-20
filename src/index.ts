@@ -31,6 +31,7 @@ import {
   trimContext,
   RAG_CONTEXT_MAX_CHARS,
   RAG_TOP_K,
+  extractCitedChunks,
 } from "./modules/rag/rag.service.js";
 import type { PromptMessage, SearchResult } from "./modules/rag/rag.types.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
@@ -410,7 +411,7 @@ const streamQodeRagAssistant = traceable(
       maxChars: RAG_CONTEXT_MAX_CHARS,
     });
     const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
-    const openAiMessages = await buildRagPromptMessages({
+    const { messages: openAiMessages, contextBlock } = await buildRagPromptMessages({
       searchResult: trimmedSearchResult,
       userQuestion: content,
       chatHistory: recentMessages,
@@ -425,6 +426,13 @@ const streamQodeRagAssistant = traceable(
     yield {
       type: "sources" as const,
       sources: formatResponse(fullContent, trimmedSearchResult).sources,
+    };
+
+    yield {
+      type: "context_snapshot" as const,
+      contextBlock,
+      allChunks: trimmedSearchResult.chunks,
+      citedChunks: extractCitedChunks(fullContent, trimmedSearchResult.chunks),
     };
   },
   {

@@ -428,6 +428,16 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS question_message_id UUID NULL REFERENCES messages(id) ON DELETE SET NULL
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_question_message_id
+    ON messages (question_message_id)
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_chat_time
     ON messages (chat_id, created_at)
   `);
@@ -588,5 +598,22 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS folders_section_name_idx
     ON folders (section_id, name)
+  `);
+
+  // 개발자 참고용 테이블
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_context_snapshots (
+      id UUID PRIMARY KEY,
+      message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      context_block TEXT NOT NULL,
+      all_chunks JSONB NOT NULL,
+      cited_chunks JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_message_context_snapshots_message_id
+    ON message_context_snapshots (message_id)
   `);
 };

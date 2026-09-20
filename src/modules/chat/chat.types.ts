@@ -1,3 +1,5 @@
+import { RetrievedChunk, SourceInfo } from "../rag/rag.types.js";
+
 export interface Messages {
   id: string; // PK
   chat_id: string; // FK 
@@ -24,3 +26,25 @@ export interface ChatParticipants {
   created_at: string;
   left_at: string | null; // TODO: 채팅 나가기 기능
 }
+
+export type StreamAssistantInput = {
+  chatId: string;
+  userId: string;
+  content: string;
+};
+
+export type SaveContextSnapshotInput = {
+  messageId: string;
+  contextBlock: string;
+  allChunks: RetrievedChunk[];
+  citedChunks: RetrievedChunk[];
+};
+
+export type StreamAssistantOutput =
+  | { type: "sources"; sources: SourceInfo[] }
+  | {
+      type: "context_snapshot";
+      contextBlock: string;
+      allChunks: RetrievedChunk[];
+      citedChunks: RetrievedChunk[];
+    };
