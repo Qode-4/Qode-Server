@@ -25,17 +25,13 @@ pnpm vitest run -t "테스트 이름"                        # 이름으로 필�
 
 API 문서는 서버 기동 후 `/docs` (Swagger UI), 헬스체크는 `/health`.
 
-### `pnpm dev` 전에 Kafka가 떠 있어야 한다
+### Kafka는 선택이지만 팀 채팅에는 필수
 
-**Kafka 없이는 서버가 아예 뜨지 않는다.** `src/index.ts:382`의 `start()`가 `app.listen()`보다 먼저
-`initSocketServer()`를 `await`하고, 그 안에서 `await producer.connect()`(`socket.server.ts:21`)를 무방비로 부른다.
-브로커가 없으면 kafkajs가 몇 초 재시도하다 던지고 `catch`가 `process.exit(1)` 한다 —
-`/health`도 `/docs`도 열리지 않는다. Kafka와 무관한 작업을 하려는데 서버가 조용히 죽으면 여기부터 의심한다.
-
-`initSocketServer`의 `if (!chatRepository) return;`은 탈출구가 아니다.
-`chatRepository`는 `index.ts:281`에서 무조건 생성되므로 절대 null이 아니다.
-
-브로커 주소는 `src/lib/kafka/kafka.client.ts:6`에 `localhost:9092`로 하드코딩돼 있다. 환경변수로 못 바꾼다.
+브로커 주소는 `KAFKA_BROKERS`(기본 `127.0.0.1:9092`, 쉼표 구분)로 지정한다.
+`initSocketServer`(`src/lib/socket/socket.server.ts`)가 producer/consumer 연결을 `try/catch`로 감싸므로
+**브로커가 없어도 서버는 뜬다.** 대신 `kafkaReady=false`로 남아 `team:message:send`가 전부
+`team:message:error`로 되돌아온다. 팀 채팅이 조용히 안 되면 기동 로그의 "Kafka 연결 실패" 경고부터 본다.
+개인 AI 채팅(`message:send`)은 Kafka를 거치지 않는다.
 
 #### macOS — Homebrew (Docker 불필요)
 
@@ -59,12 +55,9 @@ kafka-topics --create --topic team-chat-message \
   --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 ```
 
-설정은 `$(brew --prefix)/etc/kafka/server.properties`, 데이터는 `$(brew --prefix)/var/lib/kraft-combined-logs`.
-brew prefix는 Intel Mac이 `/usr/local`, Apple Silicon이 `/opt/homebrew`다.
-
 **함정 — 브로커는 멀쩡한데 CLI만 죽는 경우.** `brew services`는 자기 `openjdk`로 브로커를 띄우지만,
 `kafka-topics` 같은 CLI는 셸의 `JAVA_HOME`을 따라간다. `~/.zshrc`에 옛 JDK 경로가 박혀 있으면
-브로커는 잘 돌면서 CLI만 `bin/java: No such file or directory`로 죽는다. 이때 `JAVA_HOME`을 고친다:
+브로커는 잘 돌면서 CLI만 `bin/java: No such file or directory`로 죽는다:
 
 ```bash
 export JAVA_HOME=$(brew --prefix)/opt/openjdk
@@ -72,8 +65,7 @@ export JAVA_HOME=$(brew --prefix)/opt/openjdk
 
 #### Docker로 띄우는 경우
 
-Windows는 Docker 방식을 쓴다 — `docs/windows-setup.md`의 「카프카 설치」·「카프카 토픽 생성」 절에 있다.
-macOS에서도 같은 명령이 동작한다(`docker ps | findstr` → `grep`만 바꾼다).
+`docs/windows-setup.md`의 「카프카 설치」·「카프카 토픽 생성」 절을 따른다. macOS에서도 같은 명령이 동작한다.
 루트의 `docker-compose.yml`은 **0바이트 빈 파일이라 `docker compose up`은 아무것도 안 띄운다.**
 
 ## 아키텍처
@@ -116,11 +108,18 @@ JWT는 access + refresh 2종. `users.token_version`으로 전역 무효화, `use
 
 - **Python RAG/분석 서버** (`RAG_SERVICE_URL`, `ANALYSIS_SERVER_URL`): `RagSearchClient.searchChunks`로 청크 검색 → `trimContext` → `buildRagMessages` → `OpenAiClient.streamChat` 스트리밍. Python 응답은 `normalizeSearchResult()`로 내부 타입 변환 후 사용한다. 파이프라인 조립도 `src/index.ts`에 있고 각 단계가 langsmith `traceable`로 감싸져 있다(`LANGSMITH_*` 환경변수는 `config/env.ts` 스키마에 없고 SDK가 `process.env`에서 직접 읽는다).
 - **GitHub OAuth Device Flow** + 레포 동기화: `ProjectSyncCoordinator`가 `SYNC_REPO_BASE_DIR` 아래로 클론/풀하고, 완료 시 인덱싱 잡을 트리거.
-- **실시간**: `src/lib/socket/socket.server.ts` (socket.io). 팀 채팅 메시지는 Kafka(`team-chat-message` 토픽)를 거쳐 컨슈머가 DB 저장 + 브로드캐스트한다. `src/lib/kafka/kafka.client.ts`의 브로커 주소는 `localhost:9092` 하드코딩 상태.
+- **실시간**: `src/lib/socket/socket.server.ts` (socket.io). 팀 채팅 메시지는 Kafka(`team-chat-message` 토픽)를 거쳐 컨슈머가 DB 저장 + 브로드캐스트한다.
 
 ### 환경변수
 
 `src/config/load-env.ts`를 **가장 먼저** import해야 한다(`.env` → 비프로덕션이면 `.env.local` 순으로 override). `src/config/env.ts`가 zod로 엄격 파싱하며 실패 시 부팅이 죽는다. 새 환경변수는 `envSchema`와 `.env.example` 양쪽에 추가한다.
+
+## 자주 놓치는 것
+
+- 이 서버는 [Qode-python](../Qode-python)(RAG 검색·인덱싱)과 짝이다. `ANALYSIS_SERVER_INTERNAL_TOKEN`과 `SYNC_REPO_BASE_DIR`은 Qode-python `.env`의 `QODE_INTERNAL_TOKEN`·저장소 루트와 일치해야 한다. 값이 어긋나면 동기화는 성공하는데 인덱싱만 401/경로 오류로 죽는다.
+- auth 라우트만 `/api` 접두어가 없다(`/auth/login`, `/auth/me` …). 나머지는 전부 `/api/*`.
+- `.env.local`은 비프로덕션에서 `.env`를 덮어쓴다. "설정을 바꿨는데 안 먹는다"면 `.env.local`을 먼저 본다.
+- 사용자용 개요는 `README.md`, 컨벤션·함정은 이 파일. 둘을 고칠 때 서로 어긋나지 않게 한다.
 
 ## 배포
 

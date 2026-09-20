@@ -123,9 +123,9 @@ DATABASE_SSL_MODE=disable
 
 ## 11. 로컬 Kafka 준비
 
-팀 채팅 메시지가 Kafka를 거치므로, **Kafka가 떠 있지 않으면 `pnpm dev`가 실패합니다.**
-서버 기동 과정에서 브로커에 접속을 시도하고 실패하면 그대로 종료되기 때문에,
-팀 채팅과 무관한 작업을 하더라도 켜 두어야 합니다.
+팀 채팅 메시지가 Kafka를 거칩니다. **Kafka가 없어도 `pnpm dev`는 뜨지만**, 기동 로그에
+"Kafka 연결 실패" 경고가 남고 팀 채팅 전송이 전부 `team:message:error`로 돌아옵니다.
+팀 채팅을 만지지 않는다면 건너뛰어도 됩니다.
 
 Kafka 4.x는 KRaft 모드라 ZooKeeper를 따로 띄우지 않습니다. Docker도 필요 없습니다.
 
@@ -150,8 +150,7 @@ kafka-topics --create --topic team-chat-message \
   --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 ```
 
-브로커 주소는 소스에 `localhost:9092`로 고정되어 있어 환경변수로 바꿀 수 없습니다
-(`src/lib/kafka/kafka.client.ts`).
+브로커 주소는 `.env`의 `KAFKA_BROKERS`로 지정합니다(기본 `127.0.0.1:9092`, 쉼표로 여러 개).
 
 설정 파일은 `$(brew --prefix)/etc/kafka/server.properties`,
 데이터는 `$(brew --prefix)/var/lib/kraft-combined-logs`에 있습니다.
