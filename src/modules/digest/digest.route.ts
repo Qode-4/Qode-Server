@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { Server as SocketIoServer } from "socket.io";
 import { HttpError } from "../../common/http-error.js";
 import { AuthService } from "../auth/auth.service.js";
 import type { AuthRepository } from "../auth/auth.repository.js";
@@ -22,6 +23,7 @@ type RouteDeps = {
       options?: { signal?: AbortSignal }
     ) => AsyncIterable<string>;
   } | null;
+  io?: SocketIoServer | null;
 };
 
 export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps) => {
@@ -29,6 +31,7 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
 
   const service = new DigestService(deps.repository, deps.openAiClient);
   const authService = new AuthService(deps.authRepository);
+  const io = deps.io ?? null;
 
   const getRequestUserId = async (request: FastifyRequest) => {
     const authorization = request.headers.authorization;
@@ -115,11 +118,18 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
           type: "object",
           properties: {
             target_chat_id: { type: "string", format: "uuid" },
+            message_ids: {
+              type: "array",
+              items: { type: "string", format: "uuid" },
+              minItems: 1,
+              maxItems: 20,
+            },
+            note: { type: "string", maxLength: 500 },
             title: { type: "string", minLength: 1, maxLength: 100 },
             content: { type: "string", minLength: 1, maxLength: 50000 },
             sources: { type: "array", maxItems: 100 },
           },
-          required: ["target_chat_id", "content"],
+          required: ["target_chat_id", "message_ids", "content"],
         },
         response: {
           201: {
@@ -141,7 +151,22 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
         userId,
         content: body.title ? `## ${body.title}\n\n${body.content}` : body.content,
         sources: body.sources as SourceInfo[],
+        messageIds: body.message_ids,
+        note: body.note,
       });
+
+      // 팀채팅 룸에 실시간 반영. socket.server 의 team:message:receive 계약과 맞춘다.
+      // 실패해도 API 응답에는 영향 없다 — 클라이언트는 응답으로도 새 카드를 받는다.
+      if (io) {
+        try {
+          io.to(message.chat_id).emit("team:message:receive", {
+            ...message,
+            sources: message.sources ?? [],
+          });
+        } catch (err) {
+          request.log.warn({ err }, "digest share socket emit failed");
+        }
+      }
 
       return reply.status(201).send({
         ok: true,

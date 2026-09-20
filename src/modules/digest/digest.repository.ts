@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { RetrievedChunk, SourceInfo } from "../rag/rag.types.js";
-import type { QaSet } from "./digest.types.js";
+import type { DigestSnapshot, QaSet } from "./digest.types.js";
 
 type QaJoinRow = {
   answer_message_id: string;
@@ -19,6 +19,7 @@ export type SharedMessageRow = {
   status: "COMPLETE" | "STREAMING" | "FAILED";
   sources: SourceInfo[];
   created_at: string;
+  deleted_at: string | null;
 };
 
 export const createDigestRepository = (db: Pool) => ({
@@ -110,27 +111,59 @@ export const createDigestRepository = (db: Pool) => ({
     return (rowCount ?? 0) > 0;
   },
 
-  /** 팀 채팅에 한 건 게시. messages.id 에 DEFAULT 가 없으므로 직접 생성한다. */
-  insertSharedMessage: async (params: {
+  /**
+   * 팀 채팅 카드 게시 + 공유 이력(스냅샷) 저장을 한 트랜잭션으로 묶는다.
+   * 카드만 올라가고 이력이 없으면 원문 조회/재공유 판정에 쓰이는 스냅샷이 깨진다.
+   */
+  insertSharedMessageWithSnapshot: async (params: {
+    sourceChatId: string;
     targetChatId: string;
     userId: string;
     content: string;
     sources: SourceInfo[];
+    sourceMessageIds: string[];
+    snapshot: DigestSnapshot;
   }): Promise<SharedMessageRow> => {
-        const { rows } = await db.query<SharedMessageRow>(
-      `
-      INSERT INTO messages (id, chat_id, user_id, role, content, status, sources)
-      VALUES (gen_random_uuid(), $1, $2, 'ASSISTANT', $3, 'COMPLETE', $4::jsonb)
-      RETURNING id, chat_id, user_id, role, content, status, sources, created_at
-      `,
-    [params.targetChatId, params.userId, params.content, JSON.stringify(params.sources)]
-    );
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
 
-    // noUncheckedIndexedAccess 때문에 rows[0] 은 undefined 가능이다.
-    // 단언(!)으로 넘기면 INSERT 실패 시 undefined 가 서비스까지 흘러가 엉뚱한 곳에서 터진다.
-    const inserted = rows[0];
-    if (!inserted) throw new Error("Failed to insert shared digest message");
-    return inserted;
+      const { rows: msgRows } = await client.query<SharedMessageRow>(
+        `
+        INSERT INTO messages (id, chat_id, user_id, role, content, status, sources)
+        VALUES (gen_random_uuid(), $1, $2, 'ASSISTANT', $3, 'COMPLETE', $4::jsonb)
+        RETURNING id, chat_id, user_id, role, content, status, sources, created_at, deleted_at
+        `,
+        [params.targetChatId, params.userId, params.content, JSON.stringify(params.sources)]
+      );
+      const inserted = msgRows[0];
+      if (!inserted) throw new Error("Failed to insert shared digest message");
+
+      await client.query(
+        `
+        INSERT INTO digest_shares
+          (id, source_chat_id, target_chat_id, digest_message_id, shared_by,
+           source_message_ids, snapshot)
+        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::uuid[], $6::jsonb)
+        `,
+        [
+          params.sourceChatId,
+          params.targetChatId,
+          inserted.id,
+          params.userId,
+          params.sourceMessageIds,
+          JSON.stringify(params.snapshot),
+        ]
+      );
+
+      await client.query("COMMIT");
+      return inserted;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   },
 });
 

@@ -32,6 +32,16 @@ const sourceInfoSchema = z.object({
  */
 export const shareDigestBodySchema = z.object({
   target_chat_id: z.string().uuid(),
+  /** preview 시 넘긴 것과 같은 message_id 배열. 원문 스냅샷을 서버가 재조회할 때 쓴다. */
+  message_ids: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(MAX_MESSAGES_PER_DIGEST)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: "message_ids must not contain duplicates",
+    }),
+  /** 질문자가 preview 때 붙인 메모. snapshot 에 그대로 보관해 원문과 함께 되돌려준다. */
+  note: z.string().max(500).optional(),
   title: z.string().min(1).max(100).optional(),
   content: z.string().min(1).max(50_000),
   sources: z.array(sourceInfoSchema).max(100).default([]),
@@ -48,6 +58,7 @@ export const messageItemJsonSchema = {
     status: { type: "string", enum: ["COMPLETE", "STREAMING", "FAILED"] },
     sources: { type: "array" },
     created_at: { type: "string", format: "date-time" },
+    deleted_at: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
   },
   required: ["id", "chat_id", "user_id", "role", "content", "status", "sources", "created_at"],
 } as const;
