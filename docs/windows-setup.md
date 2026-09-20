@@ -147,10 +147,11 @@ pnpm vitest run src/modules/team-chat/team-chat.repository.test.ts
 
 ## 카프카 설치
 
+팀 채팅용입니다. 없어도 서버는 뜨고 팀 채팅만 비활성됩니다. 브로커 주소는 `.env`의 `KAFKA_BROKERS`(기본 `127.0.0.1:9092`).
+
 ```
 docker run -d --name kafka -p 9092:9092 apache/kafka:latest
 docker ps | findstr kafka
-pnpm add kafkajs
 ```
 
 ## 카프카 토픽 생성
