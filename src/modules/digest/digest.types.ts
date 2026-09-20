@@ -32,3 +32,9 @@ export type DigestSnapshot = {
   note: string | null;
   pairs: DigestSnapshotPair[];
 };
+
+export type RecentShareItem = {
+  digestMessageId: string;
+  targetChatId: string;
+  sharedAt: string;
+};

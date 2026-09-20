@@ -1,8 +1,27 @@
 import { z } from "zod";
 
 export const MAX_MESSAGES_PER_DIGEST = 20;
+/** 중복 안내 조회의 시간 창. 이보다 오래된 공유는 새 공유로 취급한다. */
+export const RECENT_SHARE_WINDOW_DAYS = 30;
 
 export const chatIdParamSchema = z.object({ id: z.string().uuid() });
+
+/** 쿼리스트링은 문자열로 오므로 CSV 로 받아 UUID 배열로 파싱한다. */
+export const recentShareQuerySchema = z.object({
+  message_ids: z
+    .string()
+    .min(1)
+    .transform((value) => value.split(",").map((v) => v.trim()).filter(Boolean))
+    .pipe(
+      z
+        .array(z.string().uuid())
+        .min(1)
+        .max(MAX_MESSAGES_PER_DIGEST)
+        .refine((ids) => new Set(ids).size === ids.length, {
+          message: "message_ids must not contain duplicates",
+        })
+    ),
+});
 
 export const previewDigestBodySchema = z.object({
   /** ASSISTANT 메시지 id. 질문은 서버가 messages.question_message_id 로 역추적한다. */
@@ -61,4 +80,14 @@ export const messageItemJsonSchema = {
     deleted_at: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
   },
   required: ["id", "chat_id", "user_id", "role", "content", "status", "sources", "created_at"],
+} as const;
+
+export const recentShareItemJsonSchema = {
+  type: "object",
+  properties: {
+    digestMessageId: { type: "string", format: "uuid" },
+    targetChatId: { type: "string", format: "uuid" },
+    sharedAt: { type: "string", format: "date-time" },
+  },
+  required: ["digestMessageId", "targetChatId", "sharedAt"],
 } as const;

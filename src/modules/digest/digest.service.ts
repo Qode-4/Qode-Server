@@ -7,7 +7,13 @@ import {
   chunkToSourceInfo,
   needsMapReduce,
 } from "./digest.prompt.js";
-import type { DigestSnapshot, DigestStreamOutput, QaSet } from "./digest.types.js";
+import type {
+  DigestSnapshot,
+  DigestStreamOutput,
+  QaSet,
+  RecentShareItem,
+} from "./digest.types.js";
+import { RECENT_SHARE_WINDOW_DAYS } from "./digest.schema.js";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -163,6 +169,27 @@ export class DigestService {
       sources: params.sources,
       sourceMessageIds: params.messageIds,
       snapshot,
+    });
+  };
+
+  /**
+   * 중복 안내용.
+   * 소유권을 여기서도 확인한다 — 남의 개인채팅 이력 조회를 막는 유일한 경계다.
+   */
+  getRecentShares = async (params: {
+    sourceChatId: string;
+    userId: string;
+    messageIds: string[];
+  }): Promise<RecentShareItem[]> => {
+    const chat = await this.repository.getChatOwnership(params.sourceChatId);
+    if (!chat) throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
+    if (chat.created_by !== params.userId) throw new HttpError(403, "Forbidden");
+
+    return this.repository.findRecentSharesByExactMessageIds({
+      sourceChatId: params.sourceChatId,
+      userId: params.userId,
+      messageIds: params.messageIds,
+      windowDays: RECENT_SHARE_WINDOW_DAYS,
     });
   };
 }

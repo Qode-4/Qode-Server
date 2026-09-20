@@ -171,7 +171,59 @@ describe("digest routes", () => {
       expect(res.json().details?.code).toBe("DIGEST_MESSAGE_UNAVAILABLE");
     });
   });
-});
 
-// otherId 는 뒤 커밋의 delete/recent 케이스에서 재사용된다.
-void otherId;
+  describe("GET recent", () => {
+    it("이력을 그대로 돌려준다", async () => {
+      const findRecentSharesByExactMessageIds = vi.fn().mockResolvedValue([
+        {
+          digestMessageId,
+          targetChatId,
+          sharedAt: "2026-09-20T00:00:00.000Z",
+        },
+      ]);
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: meId,
+        }),
+        findRecentSharesByExactMessageIds,
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/chats/me/${sourceChatId}/digests/recent?message_ids=${answer1},${answer2}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data).toHaveLength(1);
+      const call = findRecentSharesByExactMessageIds.mock.calls[0]![0];
+      expect(call.messageIds).toEqual([answer1, answer2]);
+      expect(call.windowDays).toBe(30);
+    });
+
+    it("소유자가 아니면 403", async () => {
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: otherId,
+        }),
+        findRecentSharesByExactMessageIds: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/chats/me/${sourceChatId}/digests/recent?message_ids=${answer1}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+  });
+});

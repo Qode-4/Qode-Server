@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { RetrievedChunk, SourceInfo } from "../rag/rag.types.js";
-import type { DigestSnapshot, QaSet } from "./digest.types.js";
+import type { DigestSnapshot, QaSet, RecentShareItem } from "./digest.types.js";
 
 type QaJoinRow = {
   answer_message_id: string;
@@ -164,6 +164,43 @@ export const createDigestRepository = (db: Pool) => ({
     } finally {
       client.release();
     }
+  },
+
+  /**
+   * 완전 일치(source_message_ids 배열 동등) + 최근 N일 이력 조회.
+   * PG 의 = 로 uuid[] 정확 비교. 순서가 달라도 같은 조합을 매칭하려면 정렬본을 저장해야 하는데,
+   * 프론트 UX 상 preview 화면에서 선택 순서를 유지하므로 배열 순서까지 같은 것만 "중복" 으로 본다.
+   * 이미 회수(soft delete) 된 카드는 안내 대상에서 뺀다.
+   */
+  findRecentSharesByExactMessageIds: async (params: {
+    sourceChatId: string;
+    userId: string;
+    messageIds: string[];
+    windowDays: number;
+  }): Promise<RecentShareItem[]> => {
+    const { rows } = await db.query<{
+      digest_message_id: string;
+      target_chat_id: string;
+      created_at: string;
+    }>(
+      `
+      SELECT s.digest_message_id, s.target_chat_id, s.created_at
+      FROM digest_shares s
+      JOIN messages m ON m.id = s.digest_message_id
+      WHERE s.source_chat_id = $1
+        AND s.shared_by = $2
+        AND s.source_message_ids = $3::uuid[]
+        AND s.created_at > NOW() - ($4::int || ' days')::interval
+        AND m.deleted_at IS NULL
+      ORDER BY s.created_at DESC
+      `,
+      [params.sourceChatId, params.userId, params.messageIds, params.windowDays]
+    );
+    return rows.map((row) => ({
+      digestMessageId: row.digest_message_id,
+      targetChatId: row.target_chat_id,
+      sharedAt: row.created_at,
+    }));
   },
 });
 

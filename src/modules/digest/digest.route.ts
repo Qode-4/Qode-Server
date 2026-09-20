@@ -10,6 +10,8 @@ import {
   chatIdParamSchema,
   messageItemJsonSchema,
   previewDigestBodySchema,
+  recentShareItemJsonSchema,
+  recentShareQuerySchema,
   shareDigestBodySchema,
 } from "./digest.schema.js";
 import { streamSse } from "../../common/sse.js";
@@ -172,6 +174,49 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
         ok: true,
         data: { ...message, sources: message.sources ?? [] },
       });
+    }
+  );
+
+  // 3) 중복 안내 — 같은 개인채팅에서 같은 message_ids 조합을 최근 30일 안에 이미 공유했는가.
+  app.get(
+    "/api/chats/me/:id/digests/recent",
+    {
+      schema: {
+        tags: ["digest"],
+        summary: "List recent shares matching an exact set of message ids (dedup guard)",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", format: "uuid" } },
+          required: ["id"],
+        },
+        querystring: {
+          type: "object",
+          properties: { message_ids: { type: "string" } },
+          required: ["message_ids"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: { type: "array", items: recentShareItemJsonSchema },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = chatIdParamSchema.parse(request.params);
+      const query = recentShareQuerySchema.parse(request.query);
+      const userId = await getRequestUserId(request);
+
+      const data = await service.getRecentShares({
+        sourceChatId: params.id,
+        userId,
+        messageIds: query.message_ids,
+      });
+      return reply.send({ ok: true, data });
     }
   );
 };
