@@ -10,6 +10,9 @@ export default defineConfig({
         // 달라진다. 파일을 하나씩 돌려 간섭을 없앤다.
         // ponytail: 전역 직렬화. 테스트가 늘어 느려지면 파일별 트랜잭션+ROLLBACK 으로 옮긴다
         fileParallelism: false,
+        // 라우트 테스트는 Fastify ajv 스키마 컴파일이 콜드일 때 첫 케이스가 유독 느리다.
+        // 기본 5s 는 flake 를 만든다 — 실제 로직은 여전히 빠르니 넉넉히 잡는다.
+        testTimeout: 15_000,
         env: {
             DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db",
             JWT_SECRET: "test-secret",

@@ -1,0 +1,382 @@
+import Fastify from "fastify";
+import jwt from "jsonwebtoken";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { registerErrorHandler } from "../../common/error-handler.js";
+import { registerDigestRoutes } from "./digest.route.js";
+import type { DigestRepository } from "./digest.repository.js";
+
+const meId = "00000000-0000-4000-8000-000000000001";
+const otherId = "00000000-0000-4000-8000-000000000002";
+const projectId = "00000000-0000-4000-8000-000000000003";
+const sourceChatId = "00000000-0000-4000-8000-000000000010";
+const targetChatId = "00000000-0000-4000-8000-000000000011";
+const digestMessageId = "00000000-0000-4000-8000-000000000020";
+const answer1 = "00000000-0000-4000-8000-000000000030";
+const answer2 = "00000000-0000-4000-8000-000000000031";
+
+const authRepository = {
+  findById: async (id: string) => ({
+    id,
+    email: "me@test.com",
+    passwordHash: "unused",
+    name: "Me",
+    avatarUrl: null,
+    tokenVersion: 0,
+  }),
+} as never;
+
+const bearer = `Bearer ${jwt.sign({ sub: meId, tokenVersion: 0 }, "test-secret")}`;
+
+type EmitLog = Array<{ event: string; payload: unknown; room: string }>;
+
+const buildApp = (
+  repository: Partial<DigestRepository>,
+  options?: { openAi?: boolean; onEmit?: (log: EmitLog[number]) => void }
+) => {
+  const emitLog: EmitLog = [];
+  const app = Fastify();
+  registerErrorHandler(app);
+
+  const io = {
+    to: (room: string) => ({
+      emit: (event: string, payload: unknown) => {
+        const entry = { event, payload, room };
+        emitLog.push(entry);
+        options?.onEmit?.(entry);
+      },
+    }),
+  } as unknown as import("socket.io").Server;
+
+  const openAiClient = options?.openAi
+    ? {
+        streamChat: async function* () {
+          yield "hello";
+        },
+      }
+    : null;
+
+  return {
+    app,
+    emitLog,
+    register: () =>
+      registerDigestRoutes(app, {
+        repository: repository as DigestRepository,
+        authRepository,
+        openAiClient,
+        io,
+      }),
+  };
+};
+
+describe("digest routes", () => {
+  const apps: Array<ReturnType<typeof Fastify>> = [];
+  afterEach(async () => {
+    await Promise.all(apps.splice(0).map((a) => a.close()));
+  });
+
+  describe("POST share", () => {
+    it("성공 시 스냅샷을 저장하고 소켓으로 브로드캐스트한다", async () => {
+      const insertSharedMessageWithSnapshot = vi.fn().mockResolvedValue({
+        id: digestMessageId,
+        chat_id: targetChatId,
+        user_id: meId,
+        role: "ASSISTANT",
+        content: "본문",
+        status: "COMPLETE",
+        sources: [],
+        created_at: "2026-09-20T00:00:00.000Z",
+        deleted_at: null,
+      });
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: meId,
+        }),
+        canShareTo: vi.fn().mockResolvedValue(true),
+        findQaSets: vi.fn().mockResolvedValue([
+          { answerMessageId: answer1, answer: "A1", questionMessageId: "q1", question: "Q1", citedChunks: [] },
+          { answerMessageId: answer2, answer: "A2", questionMessageId: "q2", question: "Q2", citedChunks: [] },
+        ]),
+        insertSharedMessageWithSnapshot,
+      };
+      const { app, emitLog, register } = buildApp(repo, { openAi: true });
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/chats/me/${sourceChatId}/digests/share`,
+        headers: { authorization: bearer },
+        payload: {
+          target_chat_id: targetChatId,
+          message_ids: [answer1, answer2],
+          note: "확인 부탁",
+          content: "정리 결과",
+          sources: [],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(insertSharedMessageWithSnapshot).toHaveBeenCalledTimes(1);
+      const call = insertSharedMessageWithSnapshot.mock.calls[0]![0];
+      expect(call.sourceMessageIds).toEqual([answer1, answer2]);
+      expect(call.snapshot.note).toBe("확인 부탁");
+      expect(call.snapshot.pairs).toHaveLength(2);
+
+      const emit = emitLog.find((e) => e.event === "team:message:receive");
+      expect(emit?.room).toBe(targetChatId);
+    });
+
+    it("message_ids 가 없으면 400", async () => {
+      const { app, register } = buildApp({}, { openAi: true });
+      apps.push(app);
+      await register();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/chats/me/${sourceChatId}/digests/share`,
+        headers: { authorization: bearer },
+        payload: { target_chat_id: targetChatId, content: "x" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("일부 message_id 가 유효하지 않으면 400 DIGEST_MESSAGE_UNAVAILABLE", async () => {
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: meId,
+        }),
+        canShareTo: vi.fn().mockResolvedValue(true),
+        findQaSets: vi.fn().mockResolvedValue([
+          { answerMessageId: answer1, answer: "A1", questionMessageId: null, question: "", citedChunks: [] },
+        ]),
+      };
+      const { app, register } = buildApp(repo, { openAi: true });
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/chats/me/${sourceChatId}/digests/share`,
+        headers: { authorization: bearer },
+        payload: {
+          target_chat_id: targetChatId,
+          message_ids: [answer1, answer2],
+          content: "x",
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().details?.code).toBe("DIGEST_MESSAGE_UNAVAILABLE");
+    });
+  });
+
+  describe("GET recent", () => {
+    it("이력을 그대로 돌려준다", async () => {
+      const findRecentSharesByExactMessageIds = vi.fn().mockResolvedValue([
+        {
+          digestMessageId,
+          targetChatId,
+          sharedAt: "2026-09-20T00:00:00.000Z",
+        },
+      ]);
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: meId,
+        }),
+        findRecentSharesByExactMessageIds,
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/chats/me/${sourceChatId}/digests/recent?message_ids=${answer1},${answer2}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data).toHaveLength(1);
+      const call = findRecentSharesByExactMessageIds.mock.calls[0]![0];
+      expect(call.messageIds).toEqual([answer1, answer2]);
+      expect(call.windowDays).toBe(30);
+    });
+
+    it("소유자가 아니면 403", async () => {
+      const repo: Partial<DigestRepository> = {
+        getChatOwnership: vi.fn().mockResolvedValue({
+          id: sourceChatId,
+          project_id: projectId,
+          created_by: otherId,
+        }),
+        findRecentSharesByExactMessageIds: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/chats/me/${sourceChatId}/digests/recent?message_ids=${answer1}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe("GET source", () => {
+    it("팀채팅 참여자면 snapshot 을 돌려준다", async () => {
+      const questionId = "00000000-0000-4000-8000-000000000040";
+      const repo: Partial<DigestRepository> = {
+        getShareByDigestMessageIdIfMember: vi.fn().mockResolvedValue({
+          note: "메모",
+          pairs: [
+            {
+              questionMessageId: questionId,
+              question: "Q",
+              answerMessageId: answer1,
+              answer: "A",
+              sources: [],
+            },
+          ],
+          sharedAt: "2026-09-20T00:00:00.000Z",
+        }),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/digests/${digestMessageId}/source`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.pairs).toHaveLength(1);
+    });
+
+    it("참여자가 아니거나 존재하지 않으면 404", async () => {
+      const repo: Partial<DigestRepository> = {
+        getShareByDigestMessageIdIfMember: vi.fn().mockResolvedValue(null),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/digests/${digestMessageId}/source`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe("DELETE shared message", () => {
+    it("공유자 본인이면 삭제하고 소켓으로 브로드캐스트한다", async () => {
+      const softDeleteTeamMessage = vi.fn().mockResolvedValue(true);
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: true,
+          sharedBy: meId,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage,
+      };
+      const { app, emitLog, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.alreadyDeleted).toBe(false);
+      expect(softDeleteTeamMessage).toHaveBeenCalledWith(digestMessageId);
+      const emit = emitLog.find((e) => e.event === "team:message:deleted");
+      expect(emit?.payload).toEqual({ chatId: targetChatId, messageId: digestMessageId });
+    });
+
+    it("이미 삭제된 카드는 성공 처리하고 브로드캐스트하지 않는다", async () => {
+      const softDeleteTeamMessage = vi.fn();
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: true,
+          sharedBy: meId,
+          isChatOwner: false,
+          alreadyDeleted: true,
+        }),
+        softDeleteTeamMessage,
+      };
+      const { app, emitLog, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.alreadyDeleted).toBe(true);
+      expect(softDeleteTeamMessage).not.toHaveBeenCalled();
+      expect(emitLog.find((e) => e.event === "team:message:deleted")).toBeUndefined();
+    });
+
+    it("공유자도 방장도 아니면 403", async () => {
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: otherId,
+          isDigest: true,
+          sharedBy: otherId,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().details?.code).toBe("DIGEST_DELETE_FORBIDDEN");
+    });
+
+    it("digest 카드가 아니면 400", async () => {
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: false,
+          sharedBy: null,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().details?.code).toBe("DIGEST_MESSAGE_NOT_DIGEST");
+    });
+  });
+});

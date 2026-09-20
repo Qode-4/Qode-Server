@@ -444,6 +444,7 @@ await registerDigestRoutes(app, {
   repository: createDigestRepository(dbPool),
   authRepository,
   openAiClient,
+  io,
 });
 
 await registerTeamChatRoutes(app, {

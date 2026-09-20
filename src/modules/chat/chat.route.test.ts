@@ -67,7 +67,7 @@ describe("chat message sources route", () => {
         }),
       } as never,
       streamAssistant: async function* () {
-        yield "답변";
+        yield { type: "token" as const, content: "답변" };
         yield { type: "sources" as const, sources };
       },
     });

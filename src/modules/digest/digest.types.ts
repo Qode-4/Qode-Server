@@ -18,3 +18,29 @@ export type QaSet = {
 export type DigestStreamOutput =
   | { type: "token"; content: string }
   | { type: "sources"; sources: SourceInfo[] };
+
+/** share 시점에 서버가 채운다. 원본 개인채팅이 나중에 삭제/수정돼도 B2 조회는 이 스냅샷으로 답한다. */
+export type DigestSnapshotPair = {
+  questionMessageId: string | null;
+  question: string;
+  answerMessageId: string;
+  answer: string;
+  sources: SourceInfo[];
+};
+
+export type DigestSnapshot = {
+  note: string | null;
+  pairs: DigestSnapshotPair[];
+};
+
+export type RecentShareItem = {
+  digestMessageId: string;
+  targetChatId: string;
+  sharedAt: string;
+};
+
+export type DigestSourceResponse = {
+  note: string | null;
+  pairs: DigestSnapshotPair[];
+  sharedAt: string;
+};
