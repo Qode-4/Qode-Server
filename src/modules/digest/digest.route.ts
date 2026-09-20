@@ -15,6 +15,7 @@ import {
   recentShareItemJsonSchema,
   recentShareQuerySchema,
   shareDigestBodySchema,
+  teamMessageParamSchema,
 } from "./digest.schema.js";
 import { streamSse } from "../../common/sse.js";
 
@@ -251,6 +252,62 @@ export const registerDigestRoutes = async (app: FastifyInstance, deps: RouteDeps
         userId,
       });
       return reply.send({ ok: true, data });
+    }
+  );
+
+  // 5) 공유 카드 회수 — 소프트 삭제 + 실시간 브로드캐스트.
+  app.delete(
+    "/api/chats/team/:chatId/messages/:messageId",
+    {
+      schema: {
+        tags: ["digest"],
+        summary: "Soft-delete a shared digest card (owner of share or chat OWNER only)",
+        params: {
+          type: "object",
+          properties: {
+            chatId: { type: "string", format: "uuid" },
+            messageId: { type: "string", format: "uuid" },
+          },
+          required: ["chatId", "messageId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: { alreadyDeleted: { type: "boolean" } },
+                required: ["alreadyDeleted"],
+              },
+            },
+            required: ["ok", "data"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = teamMessageParamSchema.parse(request.params);
+      const userId = await getRequestUserId(request);
+
+      const { alreadyDeleted } = await service.deleteSharedMessage({
+        chatId: params.chatId,
+        messageId: params.messageId,
+        userId,
+      });
+
+      if (!alreadyDeleted && io) {
+        try {
+          io.to(params.chatId).emit("team:message:deleted", {
+            chatId: params.chatId,
+            messageId: params.messageId,
+          });
+        } catch (err) {
+          request.log.warn({ err }, "digest delete socket emit failed");
+        }
+      }
+
+      return reply.send({ ok: true, data: { alreadyDeleted } });
     }
   );
 };

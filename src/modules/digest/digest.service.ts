@@ -207,6 +207,43 @@ export class DigestService {
     if (!source) throw new HttpError(404, "공유된 원본을 찾을 수 없습니다.");
     return source;
   };
+
+  /**
+   * 공유 카드 회수(소프트 삭제).
+   * 규칙:
+   *  - digest_shares 에 있는 카드만 회수 대상(일반 팀채팅 메시지는 이 API 로 못 지운다).
+   *  - 공유자 본인 또는 팀채팅 OWNER 만 가능.
+   *  - 이미 지워진 카드는 idempotent 하게 성공 처리(다시 브로드캐스트는 하지 않는다).
+   */
+  deleteSharedMessage = async (params: {
+    chatId: string;
+    messageId: string;
+    userId: string;
+  }): Promise<{ alreadyDeleted: boolean }> => {
+    const ctx = await this.repository.getTeamMessageForDelete({
+      chatId: params.chatId,
+      messageId: params.messageId,
+      userId: params.userId,
+    });
+    if (!ctx) throw new HttpError(404, "메시지를 찾을 수 없습니다.");
+    if (!ctx.isDigest) {
+      throw new HttpError(400, "digest 공유 카드만 회수할 수 있습니다.", {
+        code: "DIGEST_MESSAGE_NOT_DIGEST",
+      });
+    }
+
+    const isOwner = ctx.sharedBy === params.userId;
+    if (!isOwner && !ctx.isChatOwner) {
+      throw new HttpError(403, "공유 카드를 삭제할 권한이 없습니다.", {
+        code: "DIGEST_DELETE_FORBIDDEN",
+      });
+    }
+
+    if (ctx.alreadyDeleted) return { alreadyDeleted: true };
+
+    await this.repository.softDeleteTeamMessage(params.messageId);
+    return { alreadyDeleted: false };
+  };
 }
 
 export const defaultTitle = (sets: QaSet[]) => {

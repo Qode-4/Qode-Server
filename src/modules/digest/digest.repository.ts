@@ -237,6 +237,67 @@ export const createDigestRepository = (db: Pool) => ({
       sharedAt: row.created_at,
     };
   },
+
+  /**
+   * 팀채팅 메시지 컨텍스트 — 삭제 권한 판정용.
+   * 한 번의 조회로 소유자·digest 카드 여부·방장 여부·이미 삭제됐는지를 뽑는다.
+   */
+  getTeamMessageForDelete: async (params: {
+    chatId: string;
+    messageId: string;
+    userId: string;
+  }): Promise<{
+    userId: string | null;
+    isDigest: boolean;
+    sharedBy: string | null;
+    isChatOwner: boolean;
+    alreadyDeleted: boolean;
+  } | null> => {
+    const { rows } = await db.query<{
+      user_id: string | null;
+      deleted_at: string | null;
+      share_by: string | null;
+      role: string;
+      is_chat_owner: boolean;
+    }>(
+      `
+      SELECT
+        m.user_id,
+        m.deleted_at,
+        m.role,
+        s.shared_by AS share_by,
+        EXISTS (
+          SELECT 1 FROM chat_participants cp
+          WHERE cp.chat_id = $1
+            AND cp.user_id = $3
+            AND cp.left_at IS NULL
+            AND cp.member_role = 'OWNER'
+        ) AS is_chat_owner
+      FROM messages m
+      JOIN chats c ON c.id = m.chat_id
+      LEFT JOIN digest_shares s ON s.digest_message_id = m.id
+      WHERE m.id = $2 AND m.chat_id = $1 AND c.chat_type = 'TEAM'
+      `,
+      [params.chatId, params.messageId, params.userId]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      userId: row.user_id,
+      isDigest: row.share_by !== null,
+      sharedBy: row.share_by,
+      isChatOwner: row.is_chat_owner,
+      alreadyDeleted: row.deleted_at !== null,
+    };
+  },
+
+  softDeleteTeamMessage: async (messageId: string): Promise<boolean> => {
+    const { rowCount } = await db.query(
+      `UPDATE messages SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
+      [messageId]
+    );
+    return (rowCount ?? 0) > 0;
+  },
 });
 
 export type DigestRepository = ReturnType<typeof createDigestRepository>;

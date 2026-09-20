@@ -274,4 +274,109 @@ describe("digest routes", () => {
       expect(res.statusCode).toBe(404);
     });
   });
+
+  describe("DELETE shared message", () => {
+    it("공유자 본인이면 삭제하고 소켓으로 브로드캐스트한다", async () => {
+      const softDeleteTeamMessage = vi.fn().mockResolvedValue(true);
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: true,
+          sharedBy: meId,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage,
+      };
+      const { app, emitLog, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.alreadyDeleted).toBe(false);
+      expect(softDeleteTeamMessage).toHaveBeenCalledWith(digestMessageId);
+      const emit = emitLog.find((e) => e.event === "team:message:deleted");
+      expect(emit?.payload).toEqual({ chatId: targetChatId, messageId: digestMessageId });
+    });
+
+    it("이미 삭제된 카드는 성공 처리하고 브로드캐스트하지 않는다", async () => {
+      const softDeleteTeamMessage = vi.fn();
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: true,
+          sharedBy: meId,
+          isChatOwner: false,
+          alreadyDeleted: true,
+        }),
+        softDeleteTeamMessage,
+      };
+      const { app, emitLog, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.alreadyDeleted).toBe(true);
+      expect(softDeleteTeamMessage).not.toHaveBeenCalled();
+      expect(emitLog.find((e) => e.event === "team:message:deleted")).toBeUndefined();
+    });
+
+    it("공유자도 방장도 아니면 403", async () => {
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: otherId,
+          isDigest: true,
+          sharedBy: otherId,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().details?.code).toBe("DIGEST_DELETE_FORBIDDEN");
+    });
+
+    it("digest 카드가 아니면 400", async () => {
+      const repo: Partial<DigestRepository> = {
+        getTeamMessageForDelete: vi.fn().mockResolvedValue({
+          userId: meId,
+          isDigest: false,
+          sharedBy: null,
+          isChatOwner: false,
+          alreadyDeleted: false,
+        }),
+        softDeleteTeamMessage: vi.fn(),
+      };
+      const { app, register } = buildApp(repo);
+      apps.push(app);
+      await register();
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/chats/team/${targetChatId}/messages/${digestMessageId}`,
+        headers: { authorization: bearer },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().details?.code).toBe("DIGEST_MESSAGE_NOT_DIGEST");
+    });
+  });
 });

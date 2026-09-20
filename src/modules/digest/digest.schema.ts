@@ -6,6 +6,10 @@ export const RECENT_SHARE_WINDOW_DAYS = 30;
 
 export const chatIdParamSchema = z.object({ id: z.string().uuid() });
 export const digestMessageIdParamSchema = z.object({ digestMessageId: z.string().uuid() });
+export const teamMessageParamSchema = z.object({
+  chatId: z.string().uuid(),
+  messageId: z.string().uuid(),
+});
 
 /** 쿼리스트링은 문자열로 오므로 CSV 로 받아 UUID 배열로 파싱한다. */
 export const recentShareQuerySchema = z.object({
