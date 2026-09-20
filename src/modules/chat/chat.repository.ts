@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { randomUUID } from "crypto";
+import type { SourceInfo } from "../rag/rag.types.js";
 
 export type ChatType = "PERSONAL" | "TEAM";
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
@@ -193,14 +194,14 @@ export function createChatRepository(pool: Pool) {
     return r.rows.reverse();
   }
 
-  async function finalizeMessage(params: { messageId: string; content: string }) {
+  async function finalizeMessage(params: { messageId: string; content: string; sources?: SourceInfo[] }) {
     const q = `
       UPDATE messages
-      SET content = $2, status = 'COMPLETE'
+      SET content = $2, sources = $3::jsonb, status = 'COMPLETE'
       WHERE id = $1
       RETURNING id
     `;
-    const r = await pool.query(q, [params.messageId, params.content]);
+    const r = await pool.query(q, [params.messageId, params.content, JSON.stringify(params.sources ?? [])]);
     if ((r.rowCount ?? 0) === 0) {
       throw new Error("Message not found");
     }
@@ -234,7 +235,7 @@ export function createChatRepository(pool: Pool) {
 
     const q = hasCursor
       ? `
-        SELECT id, chat_id, user_id, role, content, status, created_at
+        SELECT id, chat_id, user_id, role, content, status, sources, created_at
         FROM messages
         WHERE chat_id = $1
           AND (
@@ -245,7 +246,7 @@ export function createChatRepository(pool: Pool) {
         LIMIT $4
       `
       : `
-        SELECT id, chat_id, user_id, role, content, status, created_at
+        SELECT id, chat_id, user_id, role, content, status, sources, created_at
         FROM messages
         WHERE chat_id = $1
         ORDER BY created_at DESC, id DESC

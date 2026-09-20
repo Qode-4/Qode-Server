@@ -28,6 +28,7 @@ export interface ProjectRepository {
   create(input: CreateProjectInput, creator: ProjectCreator): Promise<Project>;
   existsById(projectId: string): Promise<boolean>;
   findMemberRole(projectId: string, userId: string): Promise<ProjectRole | null>;
+  findMemberRoles(projectId: string, userIds: string[]): Promise<Map<string, ProjectRole>>;
   findProjectByInviteCode(code: string): Promise<{ id: string; name: string } | null>;
   countMembers(projectId: string): Promise<number>;
   reissueInvite(input: { projectId: string; actorId: string }): Promise<string>;
@@ -394,6 +395,29 @@ export class PgProjectRepository implements ProjectRepository {
 
     const row = result.rows[0];
     return row?.role ?? null;
+  }
+
+  // 팀 채팅 생성 시 초대할 여러 유저가 전부 프로젝트 멤버인지 한 번에 확인한다.
+  // 개별 findMemberRole 을 N번 호출하는 대신 IN 절 한 번으로 끝낸다.
+  async findMemberRoles(projectId: string, userIds: string[]): Promise<Map<string, ProjectRole>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+    const result = await this.pool.query<{ user_id: string; role: ProjectRole }>(
+      `
+      SELECT user_id, role
+      FROM project_members
+      WHERE project_id = $1
+        AND user_id = ANY($2::uuid[])
+      `,
+      [projectId, userIds]
+    );
+
+    const map = new Map<string, ProjectRole>();
+    for (const row of result.rows) {
+      map.set(row.user_id, row.role);
+    }
+    return map;
   }
 
   async findProjectByInviteCode(code: string): Promise<{ id: string; name: string } | null> {

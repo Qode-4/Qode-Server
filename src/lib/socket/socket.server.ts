@@ -68,6 +68,20 @@ export async function initSocketServer(
             socket.join(roomId);
         });
 
+        // 프로젝트 스코프 룸 — 팀채팅 생성·이름변경·삭제·초대·강퇴·양도 브로드캐스트를
+        // 받으려면 활성 채팅에 join 하지 않은 사용자도 이 룸에 참여해야 한다.
+        socket.on("project:join", (projectId: string) => {
+            if (typeof projectId === "string" && projectId.length > 0) {
+                socket.join(`project:${projectId}`);
+            }
+        });
+
+        socket.on("project:leave", (projectId: string) => {
+            if (typeof projectId === "string" && projectId.length > 0) {
+                socket.leave(`project:${projectId}`);
+            }
+        });
+
         // 기존 AI 채팅
         socket.on("message:send", async (data: { roomId: string; content: string; userId: string }) => {
             const message = await chatRepository.insertMessage({

@@ -411,6 +411,11 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb
+  `);
+
+  await pool.query(`
     UPDATE messages
     SET created_at = NOW()
     WHERE created_at IS NULL
