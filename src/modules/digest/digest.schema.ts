@@ -1,0 +1,53 @@
+import { z } from "zod";
+
+export const MAX_MESSAGES_PER_DIGEST = 20;
+
+export const chatIdParamSchema = z.object({ id: z.string().uuid() });
+
+export const previewDigestBodySchema = z.object({
+  /** ASSISTANT 메시지 id. 질문은 서버가 messages.question_message_id 로 역추적한다. */
+  message_ids: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(MAX_MESSAGES_PER_DIGEST)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: "message_ids must not contain duplicates",
+    }),
+    /** 질문자가 공유하며 덧붙이는 한 줄 메모. 프롬프트에 맥락으로 들어간다. */
+    note: z.string().max(500).optional(),
+});
+
+const sourceInfoSchema = z.object({
+  filePath: z.string().max(1000),
+  startLine: z.number().int().nullable(),
+  endLine: z.number().int().nullable(),
+  snippet: z.string().max(5000),
+  relevanceScore: z.number(),
+});
+
+/**
+ * 프론트가 미리보기에서 받은 본문을 그대로 돌려보낸다.
+ * 서버가 원본을 들고 있지 않으므로 여기 오는 값은 조작 가능하다는 점을 전제로 한다.
+ * 그래서 크기 상한만 엄격히 건다.
+ */
+export const shareDigestBodySchema = z.object({
+  target_chat_id: z.string().uuid(),
+  title: z.string().min(1).max(100).optional(),
+  content: z.string().min(1).max(50_000),
+  sources: z.array(sourceInfoSchema).max(100).default([]),
+});
+
+export const messageItemJsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    chat_id: { type: "string", format: "uuid" },
+    user_id: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
+    role: { type: "string", enum: ["USER", "ASSISTANT", "SYSTEM"] },
+    content: { type: "string" },
+    status: { type: "string", enum: ["COMPLETE", "STREAMING", "FAILED"] },
+    sources: { type: "array" },
+    created_at: { type: "string", format: "date-time" },
+  },
+  required: ["id", "chat_id", "user_id", "role", "content", "status", "sources", "created_at"],
+} as const;

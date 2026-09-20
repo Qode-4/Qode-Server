@@ -24,6 +24,8 @@ import { ProjectAnalysisService } from "./modules/project-analysis/project-analy
 import { registerProjectRoutes } from "./modules/project/project.route.js";
 import { PgProjectRepository } from "./modules/project/project.repository.js";
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
+import { createDigestRepository } from "./modules/digest/digest.repository.js";
+import { registerDigestRoutes } from "./modules/digest/digest.route.js";
 import {
   buildRagMessages,
   formatResponse,
@@ -47,6 +49,7 @@ import { initSocketServer } from "./lib/socket/socket.server.js";
 import { PgTeamChatRepository } from "./modules/team-chat/team-chat.repository.js";
 import { registerTeamChatRoutes } from "./modules/team-chat/team-chat.route.js";
 import { TeamChatService } from "./modules/team-chat/team-chat.service.js";
+import { StreamAssistantInput, StreamAssistantOutput } from "./modules/chat/chat.types.js";
 
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
@@ -382,24 +385,14 @@ const buildRagPromptMessages = traceable(
   }
 );
 const streamQodeRagAssistant = traceable(
-  async function* ({
-    chatId,
-    content,
-  }: {
-    chatId: string;
-    userId: string;
-    content: string;
-  }) {
-    if (!openAiClient) {
-      yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
-      return;
-    }
+  async function* (
+    input: StreamAssistantInput
+  ): AsyncGenerator<StreamAssistantOutput, void, unknown> {
+    const { chatId, content } = input;
 
+    if (!openAiClient) throw new HttpError(503, "OPENAI_API_KEY가 설정되지 않았습니다.");
     const chat = await chatRepository.getChatById(chatId);
-    if (!chat) {
-      yield "채팅방을 찾을 수 없습니다.";
-      return;
-    }
+    if (!chat) throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
 
     const searchResult = await searchRagChunks({
       query: content,
@@ -420,7 +413,7 @@ const streamQodeRagAssistant = traceable(
     let fullContent = "";
     for await (const token of openAiClient.streamChat(openAiMessages)) {
       fullContent += token;
-      yield token;
+      yield { type: "token", content: token };
     }
 
     yield {
@@ -445,6 +438,12 @@ await registerChatRoutes(app, {
   projectRepository,
   authRepository,
   streamAssistant: streamQodeRagAssistant,
+});
+
+await registerDigestRoutes(app, {
+  repository: createDigestRepository(dbPool),
+  authRepository,
+  openAiClient,
 });
 
 await registerTeamChatRoutes(app, {

@@ -41,6 +41,7 @@ export type SaveContextSnapshotInput = {
 };
 
 export type StreamAssistantOutput =
+  | { type: "token"; content: string }
   | { type: "sources"; sources: SourceInfo[] }
   | {
       type: "context_snapshot";

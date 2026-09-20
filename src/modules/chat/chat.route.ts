@@ -349,6 +349,8 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       };
 
       let assistantMessageId: string | null = null;
+      let fullContent = "";
+      let sources: SourceInfo[] = [];
 
       try {
         const userMessage = await service.sendUserMessage({
@@ -374,16 +376,15 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           throw new HttpError(501, "AI streaming provider is not configured");
         }
 
-        let fullContent = "";
-        let sources: SourceInfo[] = [];
+        
         for await (const chunk of deps.streamAssistant({
           chatId: params.id,
           userId,
           content: body.content,
         })) {
-          if (typeof chunk === "string") {
-            fullContent += chunk;
-            sendEvent("token", { token: chunk });
+          if (chunk.type === "token") {
+            fullContent += chunk.content;
+            sendEvent("token", { token: chunk.content });
             continue;
           }
 
@@ -421,7 +422,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           const partial = error instanceof Error ? error.message : undefined;
           await service.failAssistantMessage({
             messageId: assistantMessageId,
-            contentPartial: partial,
+            contentPartial: fullContent || undefined,
           });
         }
 
