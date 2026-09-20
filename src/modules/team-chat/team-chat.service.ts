@@ -93,16 +93,16 @@ export class TeamChatService {
         return room;
     }
 
-    // BR-D3-02 — 팀 채팅은 방 멤버 누구나 이름을 바꿀 수 있다.
+    // 방 이름 변경은 방장(OWNER) 만 가능하다. 방장이 아닌 참여자 · 프로젝트 멤버는 403.
     async renameRoomOrThrow(params: { chatId: string; name: string; currentUserId: string }) {
         const room = await this.repository.getRoom(params.chatId);
         if (!room) {
             throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
         }
 
-        const myRole = await this.projectRepository.findMemberRole(room.projectId, params.currentUserId);
-        if (!myRole) {
-            throw new HttpError(403, "프로젝트 멤버만 채팅방 이름을 변경할 수 있습니다.");
+        const myRoomRole = await this.repository.getParticipantRole(params.chatId, params.currentUserId);
+        if (myRoomRole !== "OWNER") {
+            throw new HttpError(403, "채팅방 이름은 방장만 바꿀 수 있습니다.");
         }
 
         const normalized = params.name.trim();
