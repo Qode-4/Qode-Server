@@ -8,10 +8,18 @@ import type { CreateProjectInput } from "./project.types.js";
 // 상한이 링크 유출을 "알려주지는" 못한다. 탐지는 별개 문제다.
 export const MAX_TEAM_MEMBERS = 20;
 
+// 프로젝트 강퇴가 성공한 뒤 팀 채팅 정리를 트리거하는 훅.
+// 트랜잭션 밖에서 실행돼 실패해도 프로젝트 강퇴 자체는 성공한다.
+export type ProjectMemberRemovedHook = (
+  projectId: string,
+  removedUserId: string
+) => Promise<void>;
+
 export class ProjectService {
   constructor(
     private readonly repository: ProjectRepository,
-    private readonly authRepository: AuthRepository
+    private readonly authRepository: AuthRepository,
+    private readonly onMemberRemoved?: ProjectMemberRemovedHook
   ) {}
 
   list(currentUserId: string) {
@@ -169,6 +177,16 @@ export class ProjectService {
     }
 
     await this.repository.removeMember(projectId, targetUserId);
+
+    // 훅은 트랜잭션 밖 — 팀 채팅 정리에 실패해도 프로젝트 강퇴 자체는 성공으로 둔다.
+    // 훅 실패 로깅·재시도는 별도 이슈.
+    if (this.onMemberRemoved) {
+      try {
+        await this.onMemberRemoved(projectId, targetUserId);
+      } catch (err) {
+        console.error("onProjectMemberRemoved hook failed", { projectId, targetUserId, err });
+      }
+    }
   }
 
   async inviteMembersByEmails(projectId: string, currentUserId: string, emails: string[]) {

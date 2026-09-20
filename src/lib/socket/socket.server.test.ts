@@ -106,11 +106,12 @@ describe("TeamChat Socket with DB", () => {
         it("메시지를 DB에 저장하고 같은 방 클라이언트에게 전달한다", async () => {
             const userId = await createTestUser("user@test.com");
             const projectId = await createTestProject(userId);
-            const room = await repo.createRoom({
+            const room = await repo.createRoomWithParticipants({
                 id: crypto.randomUUID(),
                 projectId,
                 name: "일반",
                 createdBy: userId,
+                memberIds: [],
             });
 
             const clientA = await connectClient();
@@ -151,8 +152,8 @@ describe("TeamChat Socket with DB", () => {
         it("다른 방 클라이언트에게는 전달되지 않는다", async () => {
             const userId = await createTestUser("user@test.com");
             const projectId = await createTestProject(userId);
-            const roomA = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "A", createdBy: userId });
-            const roomB = await repo.createRoom({ id: crypto.randomUUID(), projectId, name: "B", createdBy: userId });
+            const roomA = await repo.createRoomWithParticipants({ id: crypto.randomUUID(), projectId, name: "A", createdBy: userId, memberIds: [] });
+            const roomB = await repo.createRoomWithParticipants({ id: crypto.randomUUID(), projectId, name: "B", createdBy: userId, memberIds: [] });
 
             const clientA = await connectClient();
             const clientB = await connectClient();

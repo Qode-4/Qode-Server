@@ -16,16 +16,11 @@ import {
 } from "./chat.schema.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import { ChatService } from "./chat.service.js";
+import { StreamAssistantInput, StreamAssistantOutput } from "./chat.types.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
 
-type StreamAssistantInput = {
-  chatId: string;
-  userId: string;
-  content: string;
-};
 
-type StreamAssistantOutput = string | { type: "sources"; sources: SourceInfo[] };
 
 type RouteDeps = {
   repository: ChatRepository;
@@ -50,6 +45,7 @@ type MessageRow = {
   role: "USER" | "ASSISTANT" | "SYSTEM";
   content: string;
   status: "COMPLETE" | "STREAMING" | "FAILED";
+  sources: SourceInfo[];
   created_at: string;
 };
 
@@ -97,9 +93,23 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       role: { type: "string", enum: ["USER", "ASSISTANT", "SYSTEM"] },
       content: { type: "string" },
       status: { type: "string", enum: ["COMPLETE", "STREAMING", "FAILED"] },
+      sources: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            filePath: { type: "string" },
+            startLine: { anyOf: [{ type: "integer" }, { type: "null" }] },
+            endLine: { anyOf: [{ type: "integer" }, { type: "null" }] },
+            snippet: { type: "string" },
+            relevanceScore: { type: "number" },
+          },
+          required: ["filePath", "startLine", "endLine", "snippet", "relevanceScore"],
+        },
+      },
       created_at: { type: "string", format: "date-time" },
     },
-    required: ["id", "chat_id", "user_id", "role", "content", "status", "created_at"],
+    required: ["id", "chat_id", "user_id", "role", "content", "status", "sources", "created_at"],
   } as const;
 
   const promptMessageItemSchema = {
@@ -127,6 +137,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
     role: row.role,
     content: row.content,
     status: row.status,
+    sources: row.sources ?? [],
     created_at: row.created_at,
   });
 
@@ -338,6 +349,8 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
       };
 
       let assistantMessageId: string | null = null;
+      let fullContent = "";
+      let sources: SourceInfo[] = [];
 
       try {
         const userMessage = await service.sendUserMessage({
@@ -349,6 +362,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         const assistantMessage = await service.startAssistantMessage({
           chatId: params.id,
           userId,
+          questionMessageId: userMessage.id,
         });
         assistantMessageId = assistantMessage.id;
 
@@ -362,20 +376,34 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           throw new HttpError(501, "AI streaming provider is not configured");
         }
 
-        let fullContent = "";
+        
         for await (const chunk of deps.streamAssistant({
           chatId: params.id,
           userId,
           content: body.content,
         })) {
-          if (typeof chunk === "string") {
-            fullContent += chunk;
-            sendEvent("token", { token: chunk });
+          if (chunk.type === "token") {
+            fullContent += chunk.content;
+            sendEvent("token", { token: chunk.content });
             continue;
           }
 
           if (chunk.type === "sources") {
+            sources = chunk.sources;
             sendEvent("sources", { sources: chunk.sources });
+            continue;
+          }
+
+          if (chunk.type === "context_snapshot") {
+            if (assistantMessageId) {
+              await service.saveContextSnapshot({
+                messageId: assistantMessageId,
+                contextBlock: chunk.contextBlock,
+                allChunks: chunk.allChunks,
+                citedChunks: chunk.citedChunks,
+              });
+            }
+            continue;
           }
         }
 
@@ -386,6 +414,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
         await service.finalizeAssistantMessage({
           messageId: assistantMessageId,
           content: fullContent,
+          sources,
         });
         sendEvent("done", { assistantMessageId });
       } catch (error) {
@@ -393,7 +422,7 @@ export const registerChatRoutes = async (app: FastifyInstance, deps: RouteDeps) 
           const partial = error instanceof Error ? error.message : undefined;
           await service.failAssistantMessage({
             messageId: assistantMessageId,
-            contentPartial: partial,
+            contentPartial: fullContent || undefined,
           });
         }
 

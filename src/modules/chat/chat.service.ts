@@ -2,6 +2,8 @@ import { HttpError } from "../../common/http-error.js";
 import { resolveUniqueChatName } from "./unique-name.js";
 import type { ProjectRepository } from "../project/project.repository.js";
 import type { createChatRepository } from "./chat.repository.js";
+import type { SourceInfo } from "../rag/rag.types.js";
+import { SaveContextSnapshotInput } from "./chat.types.js";
 
 type ChatRepository = ReturnType<typeof createChatRepository>;
 
@@ -14,11 +16,13 @@ type SendUserMessageInput = {
 type StartAssistantMessageInput = {
   chatId: string;
   userId: string;
+  questionMessageId: string;
 };
 
 type FinalizeAssistantMessageInput = {
   messageId: string;
   content: string;
+  sources?: SourceInfo[];
 };
 
 type FailAssistantMessageInput = {
@@ -196,6 +200,7 @@ export class ChatService {
       role: "ASSISTANT",
       content: "",
       status: "STREAMING",
+      questionMessageId: input.questionMessageId,
     });
   }
 
@@ -205,6 +210,10 @@ export class ChatService {
 
   failAssistantMessage(input: FailAssistantMessageInput) {
     return this.repository.failMessage(input);
+  }
+
+  saveContextSnapshot(input: SaveContextSnapshotInput) {
+    return this.repository.saveContextSnapshot(input);
   }
 
   async listMessages(input: ListMessagesInput) {

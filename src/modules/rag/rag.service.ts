@@ -7,6 +7,7 @@ import type {
   SearchResult,
   SourceInfo,
 } from "./rag.types.js";
+import { OpenAiMessage } from "../../lib/openai-client.js";
 
 const pythonSearchResultSchema: z.ZodType<PythonSearchResult> = z.object({
   chunks: z.array(
@@ -121,7 +122,9 @@ export const trimContext = (chunks: RetrievedChunk[], maxChars = RAG_CONTEXT_MAX
   return result;
 };
 
-export const buildRagSystemPrompt = (searchResult: SearchResult): string => {
+export const buildRagSystemPrompt = (
+  searchResult: SearchResult
+): { systemPrompt: string; contextBlock: string } => {
   const contextBlock = searchResult.chunks
     .map((chunk) => {
       const { source, start_line: startLine, end_line: endLine } = chunk.metadata;
@@ -130,7 +133,7 @@ export const buildRagSystemPrompt = (searchResult: SearchResult): string => {
     })
     .join("\n\n");
 
-  return [
+  const systemPrompt = [
     "너는 Qode의 코드 어시스턴트다.",
     "아래 참고 코드만 근거로 답변하고, 알 수 없는 내용은 추측하지 말고 모른다고 말한다.",
     "답변에는 관련 파일 경로와 라인 범위를 함께 포함한다.",
@@ -138,17 +141,21 @@ export const buildRagSystemPrompt = (searchResult: SearchResult): string => {
     "참고 코드:",
     contextBlock || "검색된 참고 코드가 없습니다.",
   ].join("\n");
+
+  return { systemPrompt, contextBlock };
 };
 
 export const buildRagMessages = (
   searchResult: SearchResult,
   userQuestion: string,
   chatHistory: PromptMessage[]
-) => {
+): { messages: OpenAiMessage[]; contextBlock: string } => {
+  const { systemPrompt, contextBlock } = buildRagSystemPrompt(searchResult);
+
   const messages = [
     {
       role: "system" as const,
-      content: buildRagSystemPrompt(searchResult),
+      content: systemPrompt,
     },
     ...chatHistory
       .filter((message) => message.content.trim().length > 0)
@@ -170,7 +177,7 @@ export const buildRagMessages = (
     });
   }
 
-  return messages;
+  return { messages, contextBlock };
 };
 
 // 출처 미리보기 길이. 화면은 파일 경로와 줄 번호를 먼저 보여주고 본문은 보조 정보다.
@@ -207,4 +214,24 @@ export const formatResponse = (llmAnswer: string, searchResult: SearchResult): R
     answer: llmAnswer,
     sources: deduplicateSources(sources),
   };
+};
+
+export const extractCitedChunks = (
+  answerText: string,
+  chunks: RetrievedChunk[]
+): RetrievedChunk[] => {
+  return chunks.filter((chunk) => {
+    const { source, start_line: startLine, end_line: endLine } = chunk.metadata;
+    if (!source) return false;
+
+    const sourceMentioned = answerText.includes(source);
+    if (!sourceMentioned) return false;
+
+    if (startLine) {
+      const linePattern = new RegExp(`L${startLine}(-${endLine ?? startLine})?`);
+      return linePattern.test(answerText) || true;
+    }
+
+    return true;
+  });
 };

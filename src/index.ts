@@ -24,6 +24,8 @@ import { ProjectAnalysisService } from "./modules/project-analysis/project-analy
 import { registerProjectRoutes } from "./modules/project/project.route.js";
 import { PgProjectRepository } from "./modules/project/project.repository.js";
 import { ProjectSyncCoordinator } from "./modules/project/project-sync.service.js";
+import { createDigestRepository } from "./modules/digest/digest.repository.js";
+import { registerDigestRoutes } from "./modules/digest/digest.route.js";
 import {
   buildRagMessages,
   formatResponse,
@@ -31,6 +33,7 @@ import {
   trimContext,
   RAG_CONTEXT_MAX_CHARS,
   RAG_TOP_K,
+  extractCitedChunks,
 } from "./modules/rag/rag.service.js";
 import type { PromptMessage, SearchResult } from "./modules/rag/rag.types.js";
 import { registerSampleItemRoutes } from "./modules/sample-item/sample-item.route.js";
@@ -45,6 +48,8 @@ import swaggerUi from "@fastify/swagger-ui";
 import { initSocketServer } from "./lib/socket/socket.server.js";
 import { PgTeamChatRepository } from "./modules/team-chat/team-chat.repository.js";
 import { registerTeamChatRoutes } from "./modules/team-chat/team-chat.route.js";
+import { TeamChatService } from "./modules/team-chat/team-chat.service.js";
+import { StreamAssistantInput, StreamAssistantOutput } from "./modules/chat/chat.types.js";
 
 const app = Fastify({
   logger: env.NODE_ENV !== "test",
@@ -173,7 +178,11 @@ const syncCoordinator = new ProjectSyncCoordinator(projectRepository, {
       }
     : projectAnalysisService
       ? async ({ projectId, syncedCommit }) => {
-          await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+          try {
+            await projectAnalysisService.scheduleRebuild(projectId, syncedCommit);
+          } catch {
+            // 분석 캐시 갱신 실패가 동기화 성공을 되돌리지는 않습니다.
+          }
         }
       : undefined,
 });
@@ -284,6 +293,14 @@ const githubOauthService = new GithubOauthService(githubOauthRepository);
 const sectionRepository = new PgSectionRepository(dbPool);
 const folderRepository = new PgFolderRepository(dbPool);
 
+// 팀 채팅 리포지토리·서비스·소켓을 프로젝트 라우트보다 먼저 만든다.
+// 프로젝트 강퇴 훅(onMemberRemoved)이 teamChatService 를 호출해 팀 채팅을 정리하고,
+// 그 결과에 따라 io 로 브로드캐스트한다.
+const chatRepository = createChatRepository(dbPool);
+const teamChatRepository = new PgTeamChatRepository(dbPool);
+const teamChatService = new TeamChatService(teamChatRepository, projectRepository);
+const io = (await initSocketServer(app, chatRepository, teamChatRepository)) ?? null;
+
 await registerGithubOauthRoutes(app, {
   repository: githubOauthRepository,
   authRepository,
@@ -294,6 +311,24 @@ await registerProjectRoutes(app, {
   githubOauthService,
   syncCoordinator,
   projectAnalysisService: projectAnalysisService ?? undefined,
+  onMemberRemoved: async (projectId, removedUserId) => {
+    const results = await teamChatService.onProjectMemberRemoved(projectId, removedUserId);
+    if (!io) return;
+    const projectRoom = `project:${projectId}`;
+    for (const r of results) {
+      if (r.wasOwner && r.successorId) {
+        io.to(projectRoom).emit("team:ownership:transferred", {
+          chatId: r.chatId,
+          newOwnerId: r.successorId,
+          previousOwnerId: removedUserId,
+        });
+      }
+      io.to(projectRoom).emit("team:participants:changed", { chatId: r.chatId });
+      if (r.chatDeleted) {
+        io.to(projectRoom).emit("team:room:deleted", { chatId: r.chatId });
+      }
+    }
+  },
 });
 await registerStorageItemRoutes(app, {
   repository: storageItemRepository,
@@ -319,7 +354,6 @@ await registerFolderRoutes(app, {
   authRepository,
 });
 
-const chatRepository = createChatRepository(dbPool);
 const searchRagChunks = traceable(
   async (input: { query: string; projectId: string; topK: number }) => {
     return ragSearchClient.searchChunks(input.query, input.projectId, input.topK);
@@ -351,24 +385,14 @@ const buildRagPromptMessages = traceable(
   }
 );
 const streamQodeRagAssistant = traceable(
-  async function* ({
-    chatId,
-    content,
-  }: {
-    chatId: string;
-    userId: string;
-    content: string;
-  }) {
-    if (!openAiClient) {
-      yield "OPENAI_API_KEY가 설정되지 않아 AI 응답을 생성할 수 없습니다.";
-      return;
-    }
+  async function* (
+    input: StreamAssistantInput
+  ): AsyncGenerator<StreamAssistantOutput, void, unknown> {
+    const { chatId, content } = input;
 
+    if (!openAiClient) throw new HttpError(503, "OPENAI_API_KEY가 설정되지 않았습니다.");
     const chat = await chatRepository.getChatById(chatId);
-    if (!chat) {
-      yield "채팅방을 찾을 수 없습니다.";
-      return;
-    }
+    if (!chat) throw new HttpError(404, "채팅방을 찾을 수 없습니다.");
 
     const searchResult = await searchRagChunks({
       query: content,
@@ -380,7 +404,7 @@ const streamQodeRagAssistant = traceable(
       maxChars: RAG_CONTEXT_MAX_CHARS,
     });
     const recentMessages = await chatRepository.listRecentForPrompt(chatId, 20);
-    const openAiMessages = await buildRagPromptMessages({
+    const { messages: openAiMessages, contextBlock } = await buildRagPromptMessages({
       searchResult: trimmedSearchResult,
       userQuestion: content,
       chatHistory: recentMessages,
@@ -389,12 +413,19 @@ const streamQodeRagAssistant = traceable(
     let fullContent = "";
     for await (const token of openAiClient.streamChat(openAiMessages)) {
       fullContent += token;
-      yield token;
+      yield { type: "token", content: token };
     }
 
     yield {
       type: "sources" as const,
       sources: formatResponse(fullContent, trimmedSearchResult).sources,
+    };
+
+    yield {
+      type: "context_snapshot" as const,
+      contextBlock,
+      allChunks: trimmedSearchResult.chunks,
+      citedChunks: extractCitedChunks(fullContent, trimmedSearchResult.chunks),
     };
   },
   {
@@ -409,11 +440,19 @@ await registerChatRoutes(app, {
   streamAssistant: streamQodeRagAssistant,
 });
 
-const teamChatRepository = new PgTeamChatRepository(dbPool);
+await registerDigestRoutes(app, {
+  repository: createDigestRepository(dbPool),
+  authRepository,
+  openAiClient,
+  io,
+});
+
 await registerTeamChatRoutes(app, {
   repository: teamChatRepository,
   projectRepository,
   authRepository,
+  service: teamChatService,
+  io,
 });
 
 // 정상 종료 시 DB 연결을 정리합니다.
@@ -423,7 +462,6 @@ app.addHook("onClose", async () => {
 
 const start = async () => {
   try {
-    await initSocketServer(app, chatRepository, teamChatRepository);
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
   } catch (error) {
     app.log.error(error);

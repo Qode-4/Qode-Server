@@ -411,6 +411,11 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   `);
 
   await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb
+  `);
+
+  await pool.query(`
     UPDATE messages
     SET created_at = NOW()
     WHERE created_at IS NULL
@@ -420,6 +425,23 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
     ALTER TABLE messages
     ALTER COLUMN created_at SET DEFAULT NOW(),
     ALTER COLUMN created_at SET NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS question_message_id UUID NULL REFERENCES messages(id) ON DELETE SET NULL
+  `);
+
+  // 소프트 삭제. 팀채팅 digest 카드 회수(B3)용.
+  // 조회 쿼리는 필터를 걸지 않고 그대로 반환한다 — 프론트가 deleted_at 을 보고 placeholder 로 그린다.
+  await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_question_message_id
+    ON messages (question_message_id)
   `);
 
   await pool.query(`
@@ -583,5 +605,47 @@ export const initializeCoreSchema = async (pool: Pool): Promise<void> => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS folders_section_name_idx
     ON folders (section_id, name)
+  `);
+
+  // 개발자 참고용 테이블
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_context_snapshots (
+      id UUID PRIMARY KEY,
+      message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      context_block TEXT NOT NULL,
+      all_chunks JSONB NOT NULL,
+      cited_chunks JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_message_context_snapshots_message_id
+    ON message_context_snapshots (message_id)
+  `);
+
+  // 개인채팅 → 팀채팅 공유(digest) 이력.
+  // messages 테이블은 팀채팅 카드 본문만 담는다. 여기는 그 카드의 출처/원본 pair/재공유 판정을 담는다.
+  // ON DELETE CASCADE:
+  //  - digest_message_id: 팀채팅에서 카드를 지우면(B3) 공유 이력도 함께 사라진다.
+  //  - source_chat_id: 개인채팅이 지워지면 이력도 정리(원본 소실 시 카드는 남지만 이력만 정리).
+  //    B2 조회는 snapshot JSONB 를 쓰므로 원본 messages 가 없어도 원문 pair 는 유지된다.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS digest_shares (
+      id UUID PRIMARY KEY,
+      source_chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      target_chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      digest_message_id UUID NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+      shared_by UUID NOT NULL REFERENCES users(id),
+      source_message_ids UUID[] NOT NULL,
+      snapshot JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // 중복 안내(B1) — 같은 개인채팅에서 최근 30일치를 훑는다. created_at DESC 로 정렬 우선.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_digest_shares_source_chat_created
+    ON digest_shares (source_chat_id, created_at DESC)
   `);
 };

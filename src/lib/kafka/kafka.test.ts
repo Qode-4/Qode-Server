@@ -71,11 +71,12 @@ describe("Kafka TeamChat", () => {
             [crypto.randomUUID(), userId]
         ).then(r => r.rows[0].id);
 
-        const room = await repo.createRoom({
+        const room = await repo.createRoomWithParticipants({
             id: crypto.randomUUID(),
             projectId,
             name: "일반",
             createdBy: userId,
+            memberIds: [],
         });
 
         const testData = {
